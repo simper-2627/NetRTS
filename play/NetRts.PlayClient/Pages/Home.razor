@@ -1,0 +1,195 @@
+@page "/"
+@inject ServerConnection Server
+@inject NavigationManager Nav
+
+<PageTitle>Lobby</PageTitle>
+
+<h1>Play</h1>
+<p class="lede">
+  You play as an ordinary API player: you see what a bot would see (fog of war included), your orders go
+  through the same <code>/commands</code> endpoint, once per tick. Pick a house bot to practise against,
+  or open a match and point your own bot at it.
+</p>
+
+<div class="cards">
+  <section class="card" aria-labelledby="server-h">
+    <h2 id="server-h">Server</h2>
+    <form class="row" @onsubmit="SaveServerAsync">
+      <label class="field">
+        <span>Address</span>
+        <input type="text" @bind="serverInput" placeholder="@Settings.DefaultServer" spellcheck="false" autocomplete="url" />
+      </label>
+      <button type="submit" class="btn ghost">Connect</button>
+    </form>
+    @if (serverError is not null)
+    {
+      <p class="error" role="alert">@serverError</p>
+    }
+    else if (houseBots is not null)
+    {
+      <p class="small ok">Connected to <code>@Settings.Server</code>.</p>
+    }
+  </section>
+
+  <section class="card" aria-labelledby="you-h">
+    <h2 id="you-h">You</h2>
+    @if (me is not null)
+    {
+      <p>Playing as <strong>@me.Name</strong>. <span class="small muted">Your key is kept in this browser.</span></p>
+      <p class="small muted">Practice record: @me.Wins W, @me.Losses L, @me.Draws D.</p>
+      <button type="button" class="btn ghost small" @onclick="ForgetKeyAsync">Use a different player</button>
+    }
+    else
+    {
+      <form class="row" @onsubmit="RegisterAsync">
+        <label class="field">
+          <span>New player name</span>
+          <input type="text" @bind="nameInput" placeholder="e.g. alex-plays" maxlength="32" spellcheck="false" />
+        </label>
+        <button type="submit" class="btn" disabled="@busy">Register</button>
+      </form>
+      <p class="small muted">3–32 letters, digits, <code>_</code> or <code>-</code>. Registering gives you an API key, the same kind a bot uses.</p>
+      <form class="row" @onsubmit="UseKeyAsync">
+        <label class="field">
+          <span>…or paste an API key</span>
+          <input type="password" @bind="keyInput" spellcheck="false" autocomplete="off" />
+        </label>
+        <button type="submit" class="btn ghost" disabled="@busy">Use key</button>
+      </form>
+    }
+    @if (playerError is not null)
+    {
+      <p class="error" role="alert">@playerError</p>
+    }
+    @if (newKey is not null)
+    {
+      <p class="small">Your API key (also saved in this browser). Copy it if you want to play from another computer or run a bot as this player:</p>
+      <pre class="snippet">@newKey</pre>
+    }
+  </section>
+</div>
+
+@if (me is not null)
+{
+  <div class="cards lobby-play">
+    <section class="card" aria-labelledby="new-h">
+      <h2 id="new-h">New match</h2>
+      <fieldset class="field">
+        <legend>Opponent</legend>
+        <div class="opponents">
+          @foreach (var bot in houseBots ?? [])
+          {
+            <label class="opponent">
+              <input type="radio" name="opponent" checked="@(setup.Opponent == bot.Name)" @onchange="() => setup.Opponent = bot.Name" />
+              <span><strong>@bot.Name</strong><span class="small muted">@bot.Description</span></span>
+            </label>
+          }
+          <label class="opponent">
+            <input type="radio" name="opponent" checked="@(setup.Opponent is null)" @onchange="() => setup.Opponent = null" />
+            <span><strong>Open match</strong><span class="small muted">Wait for other players: your own bot (BotRunner or any language), a classmate, or another browser.</span></span>
+          </label>
+        </div>
+      </fieldset>
+      @if (setup.Opponent is null)
+      {
+        <div class="row">
+          <label class="field">
+            <span>Players</span>
+            <select @bind="setup.Players">
+              @for (var n = 2; n <= 8; n++)
+              {
+                <option value="@n">@n</option>
+              }
+            </select>
+          </label>
+          <label class="field">
+            <span>Name (optional)</span>
+            <input type="text" @bind="setup.Name" placeholder="e.g. lab-table-3" maxlength="32" spellcheck="false" />
+          </label>
+        </div>
+      }
+      <details class="settings">
+        <summary>Settings</summary>
+        <div class="row">
+          <label class="field">
+            <span>Speed</span>
+            <select @bind="setup.TickIntervalMs">
+              @foreach (var ms in MatchSetup.TickChoices)
+              {
+                <option value="@ms">@(ms / 1000.0) s per tick</option>
+              }
+            </select>
+          </label>
+          <label class="field">
+            <span>Map</span>
+            <select @bind="setup.MapSize">
+              @foreach (var size in MatchSetup.MapChoices)
+              {
+                <option value="@size">@(size == 0 ? "Default" : $"{size} × {size}")</option>
+              }
+            </select>
+          </label>
+          <label class="field">
+            <span>Tick limit</span>
+            <input type="number" min="10" max="20000" @bind="setup.MaxTicks" placeholder="1800" />
+          </label>
+          <label class="field">
+            <span>Seed</span>
+            <input type="number" @bind="setup.Seed" placeholder="random" />
+          </label>
+        </div>
+      </details>
+      <p><button type="button" class="btn" @onclick="CreateAsync" disabled="@busy">@(setup.Opponent is null ? "Open the match" : "Play")</button></p>
+      @if (createError is not null)
+      {
+        <p class="error" role="alert">@createError</p>
+      }
+    </section>
+
+    <section class="card" aria-labelledby="join-h">
+      <h2 id="join-h">Join a match</h2>
+      @if (mine.Count > 0)
+      {
+        <h3 class="small muted">Your matches</h3>
+        <ul class="match-list">
+          @foreach (var m in mine)
+          {
+            <li>
+              <span>@Describe(m) <span class="small muted">@m.Status</span></span>
+              <a class="btn small" href="play/@m.MatchId">@(m.Status == MatchStatus.Active ? "Resume" : "Open")</a>
+            </li>
+          }
+        </ul>
+      }
+      <h3 class="small muted">Waiting for players</h3>
+      @if (waiting.Count == 0)
+      {
+        <p class="small muted">No open matches right now.</p>
+      }
+      else
+      {
+        <ul class="match-list">
+          @foreach (var m in waiting)
+          {
+            <li>
+              <span>@Describe(m) <span class="small muted">@m.Players.Count / @m.MaxPlayers seated</span></span>
+              <button type="button" class="btn small" disabled="@busy" @onclick="() => JoinAsync(m.MatchId)">Join</button>
+            </li>
+          }
+        </ul>
+      }
+      <form class="row" @onsubmit="JoinByKeyAsync">
+        <label class="field">
+          <span>Match id or name</span>
+          <input type="text" @bind="joinInput" spellcheck="false" />
+        </label>
+        <button type="submit" class="btn ghost" disabled="@busy">Join</button>
+      </form>
+      <p><button type="button" class="btn ghost small" @onclick="RefreshMatchesAsync">Refresh</button></p>
+      @if (joinError is not null)
+      {
+        <p class="error" role="alert">@joinError</p>
+      }
+    </section>
+  </div>
+}

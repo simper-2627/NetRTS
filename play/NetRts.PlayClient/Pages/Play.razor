@@ -1,0 +1,7 @@
+@page "/play/{MatchId:guid}"
+
+<GameScreen @key="MatchId" MatchId="MatchId" />
+
+@code {
+    [Parameter] public Guid MatchId { get; set; }
+}

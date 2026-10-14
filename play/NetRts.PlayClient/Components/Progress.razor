@@ -1,0 +1,10 @@
+<span class="progress-row">
+  <span class="progress-label">@Label</span>
+  <span class="bar" role="progressbar" aria-label="@Label" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@Percent"><span style="width:@(Math.Clamp(Percent, 0, 100))%"></span></span>
+  <span class="pct">@Percent%</span>
+</span>
+
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public int Percent { get; set; }
+}

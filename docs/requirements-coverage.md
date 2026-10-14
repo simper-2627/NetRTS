@@ -72,3 +72,10 @@ Deliberate deviations are marked **Δ**.
 | 008 Score breakdown | `MatchResultDto`: destruction / economy / survival plus kill and loss stats. |
 | 009 Invalid commands rejected informatively | Per-command `{code, message}`; tests cover ownership, bounds, resources, prerequisites. |
 | 010 Units act within one tick | Commands run at the start of the next tick. |
+
+## Beyond the spec: playing by hand
+
+The play client (`play/NetRts.PlayClient`, see [play-client.md](play-client.md)) lets a person
+play through the bot API: fogged `/state` long-polls and one `POST /commands` per tick, no
+spectator endpoints. Tested in `play/NetRts.PlayClient.Tests` (state adapter, session loop and
+order batching, selection, smart orders, command card and placement against `GameRules`).

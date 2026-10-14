@@ -26,6 +26,7 @@
     <ProjectReference Include="..\NetRts.Engine\NetRts.Engine.csproj" />
     <ProjectReference Include="..\NetRts.Bots\NetRts.Bots.csproj" />
     <ProjectReference Include="..\NetRts.ServiceDefaults\NetRts.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\NetRts.Web.Rendering\NetRts.Web.Rendering.csproj" />
   </ItemGroup>
 
   <ItemGroup>

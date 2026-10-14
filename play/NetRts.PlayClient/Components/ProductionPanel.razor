@@ -1,0 +1,45 @@
+@* Your buildings and what they are doing: construction, production queues, research. *@
+
+<section class="side-panel" aria-labelledby="prod-h">
+  <h2 id="prod-h">Base</h2>
+  @if (Session?.State is { } s)
+  {
+    <ul class="base-list">
+      @foreach (var b in s.Buildings.Where(b => b.Owner == s.You.Slot).OrderBy(b => b.Type).ThenBy(b => b.Id))
+      {
+        <li>
+          <span class="b-name">@Lore.Building(b.Type, b.Owner) <span class="muted">#@b.Id</span></span>
+          @if (!b.Completed)
+          {
+            <Progress Label="Building" Percent="b.ConstructionPercent" />
+          }
+          @for (var i = 0; i < b.Production.Count; i++)
+          {
+            var p = b.Production[i];
+            if (i == 0)
+            {
+              <Progress Label="@Lore.Unit(p.UnitType)" Percent="p.Percent" />
+            }
+            else
+            {
+              <span class="queued">+ @Lore.Unit(p.UnitType)</span>
+            }
+          }
+          @if (b.Research is { } r)
+          {
+            <Progress Label="@Lore.Upgrade(r.Upgrade)" Percent="r.Percent" />
+          }
+          @if (b.Hp < b.MaxHp && b.Completed)
+          {
+            <span class="small muted">HP @b.Hp / @b.MaxHp</span>
+          }
+        </li>
+      }
+    </ul>
+  }
+</section>
+
+@code {
+    [Parameter] public GameSession? Session { get; set; }
+    [Parameter] public Lore Lore { get; set; } = Lore.Classic;
+}

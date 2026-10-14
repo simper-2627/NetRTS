@@ -1,0 +1,61 @@
+@* Pause, step and speed (only where the server allows it: you against house bots), and surrender. *@
+
+<div class="game-controls" role="group" aria-label="Match controls">
+  @if (Active)
+  {
+    @if (SpeedAdjustable)
+    {
+      <button type="button" class="btn small ghost" aria-pressed="@Paused" @onclick="() => OnPause.InvokeAsync(!Paused)" title="Pause or resume (P)">@(Paused ? "Resume" : "Pause")</button>
+      @if (Paused)
+      {
+        <button type="button" class="btn small ghost" @onclick="OnStep" title="Run one tick">Step</button>
+      }
+      <label class="small muted speed-pick">
+        Speed
+        <select value="@TickIntervalMs" @onchange="e => OnSpeed.InvokeAsync(int.Parse((string)e.Value!, System.Globalization.CultureInfo.InvariantCulture))">
+          @foreach (var ms in Choices(TickIntervalMs))
+          {
+            <option value="@ms">@(ms / 1000.0) s/tick</option>
+          }
+        </select>
+      </label>
+    }
+    @if (confirming)
+    {
+      <span class="surrender-ask">Give up?</span>
+      <button type="button" class="btn small danger" @onclick="SurrenderAsync">Surrender</button>
+      <button type="button" class="btn small ghost" @onclick="() => confirming = false">Keep playing</button>
+    }
+    else
+    {
+      <button type="button" class="btn small ghost" @onclick="() => confirming = true">Surrender…</button>
+    }
+  }
+  @if (Error is not null)
+  {
+    <span class="small notice" role="alert">@Error</span>
+  }
+</div>
+
+@code {
+    [Parameter] public bool Active { get; set; }
+    [Parameter] public bool SpeedAdjustable { get; set; }
+    [Parameter] public bool Paused { get; set; }
+    [Parameter] public int TickIntervalMs { get; set; }
+    [Parameter] public string? Error { get; set; }
+    [Parameter] public EventCallback<bool> OnPause { get; set; }
+    [Parameter] public EventCallback OnStep { get; set; }
+    [Parameter] public EventCallback<int> OnSpeed { get; set; }
+    [Parameter] public EventCallback OnSurrender { get; set; }
+
+    private bool confirming;
+
+    private static IEnumerable<int> Choices(int current) =>
+        MatchControls.Speeds.Contains(current) ? MatchControls.Speeds : MatchControls.Speeds.Append(current).Order();
+
+    private async Task SurrenderAsync()
+    {
+        confirming = false;
+        await OnSurrender.InvokeAsync();
+    }
+}

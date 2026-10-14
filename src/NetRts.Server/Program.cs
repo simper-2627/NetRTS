@@ -10,6 +10,10 @@ using NetRts.Server.Matches;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
+// The map renderer comes from NetRts.Web.Rendering at _content/NetRts.Web.Rendering/. Development
+// serves it from the library automatically; this does the same for a build run in any other
+// environment. Published output has the files in wwwroot, and then this does nothing.
+builder.WebHost.UseStaticWebAssets();
 
 var options = builder.Configuration.GetSection(NetRtsOptions.Section).Get<NetRtsOptions>() ?? new NetRtsOptions();
 builder.Services.Configure<NetRtsOptions>(builder.Configuration.GetSection(NetRtsOptions.Section));

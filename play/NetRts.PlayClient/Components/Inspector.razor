@@ -1,0 +1,39 @@
+@* Something that isn't yours: an enemy unit or building (visible or remembered), or a deposit. Only what /state shows. *@
+
+@if (State.Units.FirstOrDefault(u => u.Id == Id) is { } u)
+{
+  <p class="sel-title">@Lore.Unit(u.Type) <span class="muted">#@u.Id</span></p>
+  <p class="small"><span class="pname" style="--pc:var(--p@(u.Owner % 16))">@Owner(u.Owner)</span></p>
+  <Progress Label="HP" Percent="@(u.MaxHp == 0 ? 0 : u.Hp * 100 / u.MaxHp)" />
+  <p class="small muted">@u.Hp / @u.MaxHp HP · @u.Activity.ToString().ToLowerInvariant()</p>
+}
+else if (State.Buildings.FirstOrDefault(b => b.Id == Id) is { } b)
+{
+  <p class="sel-title">@Lore.Building(b.Type, b.Owner) <span class="muted">#@b.Id</span></p>
+  <p class="small"><span class="pname" style="--pc:var(--p@(b.Owner % 16))">@Owner(b.Owner)</span></p>
+  <Progress Label="HP" Percent="@(b.MaxHp == 0 ? 0 : b.Hp * 100 / b.MaxHp)" />
+  @if (!b.Completed)
+  {
+    <p class="small muted">Under construction, @b.ConstructionPercent%</p>
+  }
+}
+else if (State.RememberedBuildings.FirstOrDefault(b => b.Id == Id) is { } r)
+{
+  <p class="sel-title">@Lore.Building(r.Type, r.Owner) <span class="muted">#@r.Id</span></p>
+  <p class="small"><span class="pname" style="--pc:var(--p@(r.Owner % 16))">@Owner(r.Owner)</span></p>
+  <p class="small muted">Last seen on tick @r.LastSeenTick with @r.Hp / @r.MaxHp HP. Right-click it to attack-move there.</p>
+}
+else if ((State.Resources.FirstOrDefault(d => d.Id == Id) ?? Deposits.Known.FirstOrDefault(d => d.Id == Id)) is { } d)
+{
+  <p class="sel-title">@(Lore.Snow ? "Grub patch" : "Ore deposit") <span class="muted">#@d.Id</span></p>
+  <p class="small muted">@d.Remaining @Lore.Ore left. Right-click it with workers selected to mine it.</p>
+}
+
+@code {
+    [Parameter, EditorRequired] public GameStateDto State { get; set; } = null!;
+    [Parameter] public int Id { get; set; }
+    [Parameter] public Lore Lore { get; set; } = Lore.Classic;
+    [Parameter, EditorRequired] public DepositMemory Deposits { get; set; } = null!;
+
+    private string Owner(int slot) => State.Players.FirstOrDefault(p => p.Slot == slot) is { } p ? Lore.Player(p.Name) : $"Player {slot + 1}";
+}

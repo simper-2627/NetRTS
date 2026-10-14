@@ -13,6 +13,10 @@ C# and Python; pick your language on any example and the rest follow.
 > [NetRTS.snowse.io](https://netrts.snowse.io) and gives you a `Decide` method to improve.
 > [Its README](../samples/csharp/README.md) has the details. Read on to learn the API itself.
 
+> **Want to play it by hand first, or play against your bot?** Run
+> `dotnet run --project play/NetRts.PlayClient` next to the server and open http://localhost:5090.
+> You play through the same API your bot will use, fog and all. See [play-client.md](play-client.md).
+
 ## 1. Get a server
 
 Your organiser will give you a server address (we'll write it as `$SERVER`). Practising on your own
@@ -140,5 +144,7 @@ what survives).
 - **[Bot guide](bot-guide.md)** — the full reference: every command, error code and stat.
 - **[samples/python/bot.py](../samples/python/bot.py)** — a complete bot with no dependencies.
 - **C# runner** — `dotnet run --project src/NetRts.BotRunner -- --help`.
+- **[Play client](play-client.md)** — play your bot yourself: open a match in the play client and
+  `--join` it with your bot.
 - **Stuck?** Check the `events` in your state for `CommandFailed` messages, and watch your bot in
   the browser — you'll usually see exactly what's going wrong.

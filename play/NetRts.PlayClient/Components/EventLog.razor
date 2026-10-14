@@ -1,0 +1,35 @@
+@* Order results (accepted or rejected, from CommandResult) and your own events, newest first. *@
+
+<section class="side-panel" aria-labelledby="log-h">
+  <h2 id="log-h">Orders and events</h2>
+  @if (Session is not null)
+  {
+    var rejected = Session.Outcomes.Where(o => !o.Accepted).Take(4).ToList();
+    @if (rejected.Count > 0)
+    {
+      <ul class="outcomes">
+        @foreach (var o in rejected)
+        {
+          <li class="hot"><span class="t">@o.Tick</span><span><b>@o.Label</b>: @Lore.Retell(o.Message ?? "") <span class="k">@o.ErrorCode</span></span></li>
+        }
+      </ul>
+    }
+    @if (Session.Outcomes.FirstOrDefault() is { Accepted: true } last)
+    {
+      <p class="small ok sent">Sent: @last.Label</p>
+    }
+    <ol class="events">
+      @foreach (var e in Session.Events.Take(60))
+      {
+        <li class="@(Hot(e.Kind) ? "hot" : "")"><span class="t">@e.Tick</span><span>@Lore.Retell(e.Message)</span></li>
+      }
+    </ol>
+  }
+</section>
+
+@code {
+    [Parameter] public GameSession? Session { get; set; }
+    [Parameter] public Lore Lore { get; set; } = Lore.Classic;
+
+    private static bool Hot(string kind) => kind is "CommandFailed" or "UnitLost" or "BuildingLost" or "PlayerEliminated";
+}

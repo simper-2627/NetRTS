@@ -1,0 +1,30 @@
+@* Every player's score: public in /state, the same numbers bots get. *@
+
+<section class="side-panel" aria-labelledby="score-h">
+  <h2 id="score-h">Score</h2>
+  @if (Session?.State is { } s)
+  {
+    <table class="score">
+      <tbody>
+        @foreach (var p in s.Players.OrderByDescending(p => p.Score.Total))
+        {
+          <tr class="@(p.Eliminated ? "out" : "")" style="--pc:var(--p@(p.Slot % 16))">
+            <th scope="row">
+              <span class="pname">@Lore.Player(p.Name)</span>
+              @if (p.Slot == s.You.Slot)
+              {
+                <span class="you">(you)</span>
+              }
+            </th>
+            <td>@p.Score.Total</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+</section>
+
+@code {
+    [Parameter] public GameSession? Session { get; set; }
+    [Parameter] public Lore Lore { get; set; } = Lore.Classic;
+}

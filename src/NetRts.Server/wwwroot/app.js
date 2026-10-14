@@ -1,6 +1,6 @@
 // Spectator UI: hash router + home view.
-import { api, html, raw, setHtml, slotVar, displayName, playerLabel, verifiedBadge, timeAgo, fmt, outcomeHtml, esc } from './util.js';
-import { GAME, SNOW, say, nickname } from './lore.js';
+import { api, html, raw, setHtml, slotVar, displayName, playerLabel, verifiedBadge, timeAgo, fmt, outcomeHtml, esc } from './_content/NetRts.Web.Rendering/util.js';
+import { GAME, SNOW, say, nickname } from './_content/NetRts.Web.Rendering/lore.js';
 import { mountSpectate } from './spectate.js';
 import { mountAccount } from './account.js';
 import { mountLeague } from './league.js';

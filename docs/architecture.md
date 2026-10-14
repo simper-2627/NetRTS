@@ -13,6 +13,16 @@
                               └────────────────────────────────────────────────────────────────┘
 ```
 
+Two browser front ends share one renderer:
+
+```text
+ src/NetRts.Web.Rendering (Razor class library: static files at _content/NetRts.Web.Rendering/)
+   mapview.js (2D canvas) · 3d/** + vendor/three (3D view) · lore.js · util.js · theme.js · netrts.css
+     ├── src/NetRts.Server/wwwroot — spectator site and replay viewer (SSE /spectate stream, /frames)
+     └── play/NetRts.PlayClient    — Blazor WebAssembly client for playing by hand: an API player
+                                     like any bot (fogged /state long-poll, one POST /commands per tick)
+```
+
 ## The engine is the product
 
 `NetRts.Engine` is a plain library with no dependencies beyond the protocol DTOs. A
@@ -56,6 +66,22 @@ quickly (`tests/NetRts.Engine.Tests`), including full matches between the house 
   connection string is present (Aspire locally, Azure in production), SQLite otherwise. In Azure the
   server signs in to PostgreSQL with its managed identity, so there is no database password at all.
 - **Spectators** get a server-sent-events stream with one omniscient snapshot per tick.
+
+## Two front ends, one renderer
+
+- **`NetRts.Web.Rendering`** is a Razor class library with no code, only static web assets: the
+  canvas map (`MapView`), the three.js 3D view, the colour tokens (`netrts.css`) and the brand
+  vocabulary (`lore.js`). The server references it; in Development the files are served from the
+  library, a published app has them under `wwwroot/_content/`, and `UseStaticWebAssets()` covers a
+  build run in any other environment.
+- **The spectator site** (`NetRts.Server/wwwroot`) feeds `MapView` omniscient frames from the SSE
+  stream or recorded replay chunks.
+- **The play client** (`play/NetRts.PlayClient`, Blazor WebAssembly, its own `NetRts.Play.sln`)
+  plays through the bot API with `NetRtsClient`: a `GameSession` long-polls the fogged `/state` and
+  sends queued orders once per tick, a C# adapter turns `GameStateDto` into the frame `MapView`
+  draws, and a small JS module adds selection, the build ghost and the minimap on top. Selection,
+  orders and the HUD are C#. Nothing on the server knows a person is playing. See
+  [play-client.md](play-client.md).
 
 ## Scaling
 

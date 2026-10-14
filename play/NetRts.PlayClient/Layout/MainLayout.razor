@@ -1,0 +1,59 @@
+@inherits LayoutComponentBase
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject ClientSettings Settings
+
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar">
+  <a class="brand only-classic" href="" aria-label="NetRTS play: lobby">
+    <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="2" y="2" width="9" height="9" class="bm-a" />
+      <circle cx="17.5" cy="17.5" r="4.5" class="bm-b" />
+      <path d="M13 6.5h8M17 2.5v8M2 17.5h9" class="bm-line" />
+    </svg>
+    <span>NetRTS <small>Play</small></span>
+  </a>
+  <a class="brand only-snow" href="" aria-label="Badger Brawl play: lobby">
+    <img class="brand-s" src="_content/NetRts.Web.Rendering/images/snow-s-white.png" alt="" width="29" height="44">
+    <span>Badger Brawl<small>Play</small></span>
+  </a>
+  <nav aria-label="Primary">
+    <NavLink href="" Match="NavLinkMatch.All">Lobby</NavLink>
+    <a href="@Settings.Server" target="_blank" rel="noopener">Spectator site</a>
+    <button type="button" class="theme-toggle" id="brand-toggle">
+      <span class="only-snow">Original theme</span><span class="only-classic">Snow College theme</span>
+    </button>
+    <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Colour theme: automatic">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" /><path d="M8 1.5a6.5 6.5 0 0 1 0 13z" fill="currentColor" /></svg>
+      <span id="theme-label">Auto</span>
+    </button>
+  </nav>
+</header>
+<main id="main" tabindex="-1">
+  @Body
+</main>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        await Settings.LoadAsync();
+        Settings.Changed += OnSettingsChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // theme.js wires up the two toggle buttons when it loads, so load it once they exist.
+            await JS.InvokeAsync<IJSObjectReference>("import", "./_content/NetRts.Web.Rendering/theme.js");
+        }
+    }
+
+    private void OnSettingsChanged() => InvokeAsync(StateHasChanged);
+
+    public ValueTask DisposeAsync()
+    {
+        Settings.Changed -= OnSettingsChanged;
+        return ValueTask.CompletedTask;
+    }
+}

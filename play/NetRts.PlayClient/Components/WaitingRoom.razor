@@ -1,0 +1,42 @@
+@* Before the first tick: who is seated, and how others (a bot, a classmate) can take the open seats. *@
+
+<section class="card waiting" aria-live="polite">
+  @if (Summary.Status == MatchStatus.Waiting)
+  {
+    var open = Summary.MaxPlayers - Summary.Players.Count;
+    <h2>Waiting for @open more player@(open == 1 ? "" : "s")</h2>
+    <p>Seated: @string.Join(", ", Summary.Players.Select(p => p.Name))</p>
+    <dl class="ids">
+      <div><dt>Match id</dt><dd><code>@Summary.MatchId</code></dd></div>
+      @if (Summary.Name is not null)
+      {
+        <div><dt>Name</dt><dd><code>@Summary.Name</code></dd></div>
+      }
+    </dl>
+    <p class="small">Seat a house-bot strategy from this repository with the BotRunner:</p>
+    <pre class="snippet">@MatchSetup.BotRunnerCommand(Server, Summary)</pre>
+    <p class="small muted">
+      Your own bot joins with <code>POST /api/v1/matches/@Summary.MatchId/join</code>
+      @if (Summary.Name is not null)
+      {
+        <text>&nbsp;(or finds the id with <code>GET /api/v1/matches/named/@Summary.Name</code>)</text>
+      }
+      and then plays as usual. Another person can join from the lobby of their own play client.
+    </p>
+    <p><button type="button" class="btn ghost" @onclick="OnLeave">Leave the match</button></p>
+  }
+  else if (Summary.Status == MatchStatus.Active)
+  {
+    <h2>The match is on (tick @Summary.Tick)</h2>
+  }
+  else
+  {
+    <h2>The match is over</h2>
+  }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public MatchSummaryDto Summary { get; set; } = null!;
+    [Parameter, EditorRequired] public string Server { get; set; } = "";
+    [Parameter] public EventCallback OnLeave { get; set; }
+}

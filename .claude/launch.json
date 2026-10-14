@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "server",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/NetRts.Server", "--no-launch-profile", "--urls", "http://localhost:5080", "--environment", "Development"],
+      "port": 5080
+    },
+    {
+      "name": "play",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "play/NetRts.PlayClient"],
+      "port": 5090
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+services:
+  netrts:
+    image: snowcollege/netrts:latest
+    container_name: netrts
+    ports:
+      - "3000:8080"
+    volumes:
+      - badger-data:/home/app
+    restart: unless-stopped
+
+volumes:
+  badger-data:
+
+
+# docker run -p 3000:8080 -v badger-data:/home/app snowcollege/netrts

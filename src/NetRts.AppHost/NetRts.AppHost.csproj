@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NetRts.Server\NetRts.Server.csproj" />
+    <ProjectReference Include="..\..\play\NetRts.PlayClient\NetRts.PlayClient.csproj" />
   </ItemGroup>
 
   <ItemGroup>

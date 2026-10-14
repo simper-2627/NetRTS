@@ -1,7 +1,7 @@
 // Spectate view: #/match/{id} or #/match/{name}
-import { api, html, setHtml, esc, slotVar, displayName, playerLabel, fmt, outcomeText } from './util.js';
-import { GAME, SNOW, say, ORE, unitName, buildingName, upgradeName, badgerize, hqName, housingName } from './lore.js';
-import { MapView, unitPath } from './mapview.js';
+import { api, html, setHtml, esc, slotVar, displayName, playerLabel, fmt, outcomeText } from './_content/NetRts.Web.Rendering/util.js';
+import { GAME, SNOW, say, ORE, unitName, buildingName, upgradeName, badgerize, hqName, housingName } from './_content/NetRts.Web.Rendering/lore.js';
+import { MapView, unitPath } from './_content/NetRts.Web.Rendering/mapview.js';
 
 const HOT = /Lost|Destroyed|Killed|Eliminated|Failed/;
 
@@ -372,7 +372,7 @@ export function mountSpectate(root, matchKey) {
   async function set3d(on) {
     if (on && !view3d) {
       try {
-        const { View3D } = await import('./3d/view.js');
+        const { View3D } = await import('./_content/NetRts.Web.Rendering/3d/view.js');
         if (!alive) return;
         view3d = new View3D(box3d, { badger: SNOW, names });
         box3d.view3d = view3d;   // handy from the dev tools console

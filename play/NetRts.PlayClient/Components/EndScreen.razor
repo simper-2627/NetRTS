@@ -1,0 +1,79 @@
+@* After the last tick: who won and how, everyone's score, and the replay on the spectator site. *@
+
+@if (Session is { Phase: SessionPhase.Finished } && hidden)
+{
+  <button type="button" class="btn small end-pill" @onclick="() => hidden = false">Show the result</button>
+}
+else if (Session is { Phase: SessionPhase.Finished, State: { } s })
+{
+  var outcome = s.Outcome ?? Session.Result?.Outcome;
+  var won = outcome?.WinnerId == s.You.PlayerId;
+  var winner = s.Players.FirstOrDefault(p => p.PlayerId == outcome?.WinnerId);
+  <div class="end-screen" role="dialog" aria-labelledby="end-h">
+    <div class="end-card @(won ? "won" : outcome?.WinnerId is null ? "draw" : "lost")">
+      <h2 id="end-h">@(outcome?.WinnerId is null ? "Draw" : won ? "Victory" : "Defeat")</h2>
+      <p class="end-sub">
+        @if (winner is not null && !won)
+        {
+          <text>@Lore.Player(winner.Name) won </text>
+        }
+        else if (won)
+        {
+          <text>You won </text>
+        }
+        @Reason(outcome?.Reason) after @(outcome?.Ticks ?? s.Tick) ticks.
+      </p>
+      @if (Session.Result is { } result)
+      {
+        <table class="end-table">
+          <thead>
+            <tr><th scope="col">Player</th><th scope="col">Destruction</th><th scope="col">Economy</th><th scope="col">Survival</th><th scope="col">Total</th><th scope="col">Built</th><th scope="col">Lost</th><th scope="col">Kills</th></tr>
+          </thead>
+          <tbody>
+            @foreach (var p in result.Players.OrderByDescending(p => p.Winner).ThenByDescending(p => p.Score.Total))
+            {
+              <tr style="--pc:var(--p@(p.Slot % 16))" class="@(p.PlayerId == s.You.PlayerId ? "me" : "")">
+                <th scope="row"><span class="pname">@Lore.Player(p.Name)</span></th>
+                <td>@p.Score.Destruction</td>
+                <td>@p.Score.Economy</td>
+                <td>@p.Score.Survival</td>
+                <td><b>@p.Score.Total</b></td>
+                <td>@p.UnitsProduced</td>
+                <td>@p.UnitsLost</td>
+                <td>@p.UnitsKilled</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+      else
+      {
+        <p class="small muted">Fetching the final scores…</p>
+      }
+      <p class="end-actions">
+        <a class="btn" href="@ReplayUrl" target="_blank" rel="noopener">Watch the replay</a>
+        <a class="btn ghost" href="">Back to the lobby</a>
+        <button type="button" class="btn ghost" @onclick="() => hidden = true">Look at the map</button>
+      </p>
+    </div>
+  </div>
+}
+
+@code {
+    [Parameter] public GameSession? Session { get; set; }
+    [Parameter] public Lore Lore { get; set; } = Lore.Classic;
+    [Parameter] public string Server { get; set; } = "";
+
+    private bool hidden;
+
+    /// <summary>The spectator site's replay viewer for this match (fine to open now that it's over).</summary>
+    private string ReplayUrl => $"{Server.TrimEnd('/')}/#/match/{Session?.MatchId}";
+
+    private static string Reason(MatchEndReason? reason) => reason switch
+    {
+        MatchEndReason.Elimination => "by elimination",
+        MatchEndReason.TimeLimit => "on score at the time limit",
+        MatchEndReason.Surrender => "by surrender",
+        _ => "",
+    };
+}

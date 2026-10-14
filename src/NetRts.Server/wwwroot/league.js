@@ -1,8 +1,8 @@
 // A league match (preseason, season, championship): the queue filling up, the heats as the admin
 // arranges them, then a live scoreboard per heat. Discord server admins also get the controls to
 // split, reshuffle and start every heat at once.
-import { api, html, setHtml, playerLabel, slotVar, fmt } from './util.js';
-import { GAME, say } from './lore.js';
+import { api, html, setHtml, playerLabel, slotVar, fmt } from './_content/NetRts.Web.Rendering/util.js';
+import { GAME, say } from './_content/NetRts.Web.Rendering/lore.js';
 
 /** Heat sizes for an even split of n players into k heats, e.g. 25 into 3 -> [8, 8, 9]. */
 export function evenSplit(n, k) {

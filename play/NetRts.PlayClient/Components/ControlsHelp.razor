@@ -1,0 +1,27 @@
+@* The controls, for anyone sitting down at the keyboard for the first time. *@
+
+<details class="side-panel controls-help">
+  <summary>Controls</summary>
+  <dl>
+    <dt>Left-click / drag</dt><dd>Select a unit or building / box-select your units</dd>
+    <dt>Shift + click</dt><dd>Add to or remove from the selection</dd>
+    <dt>Double-click, Ctrl + click</dt><dd>Every unit of that type</dd>
+    <dt>Right-click</dt><dd>Move; on @Lore.Ore: mine; on an enemy: attack; on your site: help build; with a building selected: rally point</dd>
+    <dt><kbd>A</kbd> then click</dt><dd>Attack-move: walk there, fighting on the way</dd>
+    <dt><kbd>S</kbd></dt><dd>Stop</dd>
+    <dt><kbd>B</kbd> <kbd>C</kbd> <kbd>D</kbd> <kbd>T</kbd> <kbd>G</kbd></dt><dd>With workers: place a building (shift-click to place several)</dd>
+    <dt><kbd>W</kbd> <kbd>S</kbd> <kbd>A</kbd> <kbd>C</kbd></dt><dd>With a building: train (Shift: five)</dd>
+    <dt><kbd>W</kbd> <kbd>A</kbd> <kbd>M</kbd> <kbd>H</kbd></dt><dd>At a TechLab: research the next upgrade</dd>
+    <dt><kbd>Ctrl</kbd> + <kbd>1</kbd>–<kbd>9</kbd></dt><dd>Save the selection as a group (<kbd>Shift</kbd> adds); <kbd>1</kbd>–<kbd>9</kbd> recalls, twice looks at it</dd>
+    <dt>Arrows, map edge, middle-drag</dt><dd>Scroll; wheel or <kbd>+</kbd> <kbd>−</kbd> zooms; <kbd>Space</kbd> looks at the selection</dd>
+    <dt>Minimap</dt><dd>Click to look, right-click to send the selection</dd>
+    <dt><kbd>I</kbd>, Idle button</dt><dd>Select the next idle worker and look at it</dd>
+    <dt><kbd>P</kbd></dt><dd>Pause (against house bots only)</dd>
+    <dt><kbd>Esc</kbd></dt><dd>Cancel, then deselect</dd>
+  </dl>
+  <p class="small muted">Orders go out once per tick, like a bot's. The server checks every one; refusals show under Orders and events.</p>
+</details>
+
+@code {
+    [Parameter] public Lore Lore { get; set; } = Lore.Classic;
+}

@@ -6,8 +6,8 @@
 // picture at fractional tick t is drawn at clock t * MS + lag. Slow-motion and freeze-frame shots slow
 // and freeze the effects with them. Frames depend only on the tick, apart from short-lived particles.
 import * as THREE from 'three';
-import { View3D } from '/src/NetRts.Server/wwwroot/3d/view.js';
-import { hqName, housingName, BUILDING_NAME } from '/src/NetRts.Server/wwwroot/lore.js';
+import { View3D } from '/src/NetRts.Web.Rendering/wwwroot/3d/view.js';
+import { hqName, housingName, BUILDING_NAME } from '/src/NetRts.Web.Rendering/wwwroot/lore.js';
 import { unitPos, frameAt, TEAM } from './battle3d.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));

@@ -1,0 +1,97 @@
+@* What is selected, and the orders it takes: the command card. *@
+
+<section class="side-panel selection-panel" aria-labelledby="sel-h">
+  <h2 id="sel-h">Selection</h2>
+  @if (Session?.State is not { } s || Controller is null)
+  {
+    <p class="small muted">—</p>
+  }
+  else if (Controller.Selection.Units.Count > 0)
+  {
+    var units = s.Units.Where(u => Controller.Selection.Units.Contains(u.Id)).ToList();
+    @if (units.Count == 1)
+    {
+      var u = units[0];
+      <p class="sel-title">@Lore.Unit(u.Type) <span class="muted">#@u.Id</span></p>
+      <Progress Label="HP" Percent="@(u.MaxHp == 0 ? 0 : u.Hp * 100 / u.MaxHp)" />
+      <p class="small muted">@u.Hp / @u.MaxHp HP · @u.Activity.ToString().ToLowerInvariant()@(u.Carrying > 0 ? $" · carrying {u.Carrying} {Lore.Ore}" : "")</p>
+    }
+    else
+    {
+      <p class="sel-title">@units.Count selected</p>
+      <p class="small">@string.Join(", ", units.GroupBy(u => u.Type).OrderBy(g => g.Key).Select(g => $"{g.Count()} {Lore.Unit(g.Key)}{(g.Count() == 1 ? "" : "s")}"))</p>
+    }
+    <div class="actions">
+      <button type="button" class="btn small @(Controller.Mode == "attack" ? "" : "ghost")" @onclick="Controller.AttackMoveModeAsync" title="Then click where to go: units fight anything they meet on the way">Attack-move <kbd>A</kbd></button>
+      <button type="button" class="btn small ghost" @onclick="Controller.StopAsync">Stop <kbd>S</kbd></button>
+    </div>
+    <CardGrid Title="Build" Buttons="Controller.Buttons()" Controller="Controller" Lore="Lore" />
+    @if (Controller.Mode == "attack")
+    {
+      <p class="small hint">Click a tile to attack-move there. Right-click or <kbd>Esc</kbd> cancels.</p>
+    }
+    else if (Controller is { Mode: "build", Placing: { } placing })
+    {
+      <p class="small hint">
+        Click a tile to build @Lore.Building(placing, s.You.Slot) (shift-click to place more). Right-click or <kbd>Esc</kbd> cancels.
+        @if (Controller.PlacementProblem is { } problem)
+        {
+          <span class="why">@problem</span>
+        }
+      </p>
+    }
+  }
+  else if (Controller.Selection.Building is { } id && s.Buildings.FirstOrDefault(b => b.Id == id) is { } b)
+  {
+    <p class="sel-title">@Lore.Building(b.Type, b.Owner) <span class="muted">#@b.Id</span></p>
+    <Progress Label="HP" Percent="@(b.MaxHp == 0 ? 0 : b.Hp * 100 / b.MaxHp)" />
+    @if (!b.Completed)
+    {
+      <Progress Label="Construction" Percent="b.ConstructionPercent" />
+    }
+    @for (var i = 0; i < b.Production.Count; i++)
+    {
+      var p = b.Production[i];
+      if (i == 0)
+      {
+        <Progress Label="@Lore.Unit(p.UnitType)" Percent="p.Percent" />
+      }
+      else
+      {
+        <span class="queued">+ @Lore.Unit(p.UnitType)</span>
+      }
+    }
+    @if (b.Research is { } r)
+    {
+      <Progress Label="@Lore.Upgrade(r.Upgrade)" Percent="r.Percent" />
+    }
+    <CardGrid Title="@(b.Type == BuildingType.TechLab ? "Research" : "Train")" Buttons="Controller.Buttons()" Controller="Controller" Lore="Lore" />
+    @if (Controller.Buttons().Any(x => x.Action is ProduceAction))
+    {
+      <p class="small muted">Shift-click (or shift + key) trains five.
+        @(b.Rally is { } rally ? $"Rally point ({rally.X}, {rally.Y}); right-click the map to move it." : "Right-click the map to set a rally point.")</p>
+    }
+  }
+  else if (Controller.Selection.Inspected is { } other)
+  {
+    <Inspector State="s" Id="other" Lore="Lore" Deposits="Controller.Deposits" />
+  }
+  else
+  {
+    <p class="small muted">Click a unit or drag a box to select. Right-click to move, mine, attack or help build. Double-click selects every unit of that type.</p>
+  }
+  @if (Controller?.Notice is { } notice)
+  {
+    <p class="small notice" role="alert">@notice</p>
+  }
+  @if (Controller is not null && Controller.Groups.Count > 0)
+  {
+    <p class="small muted groups">Groups: @string.Join("  ", Controller.Groups.OrderBy(g => g.Key).Select(g => $"{g.Key}·{(g.Value.Building is not null ? "B" : g.Value.Units.Length.ToString(System.Globalization.CultureInfo.InvariantCulture))}"))</p>
+  }
+</section>
+
+@code {
+    [Parameter] public GameSession? Session { get; set; }
+    [Parameter] public PlayController? Controller { get; set; }
+    [Parameter] public Lore Lore { get; set; } = Lore.Classic;
+}

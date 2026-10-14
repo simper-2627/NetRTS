@@ -1,0 +1,47 @@
+@* The strip above the map: the clock, your economy and your army. *@
+
+<div class="resource-bar" role="status" aria-live="off">
+  @if (Session?.State is { } s)
+  {
+    var me = s.You;
+    var mine = s.Units.Where(u => u.Owner == me.Slot).ToList();
+    var workers = mine.Count(u => u.Type == UnitType.Worker);
+    <span class="rb-item rb-tick"><span class="rb-k">Tick</span> <b>@s.Tick</b><small>/ @s.MaxTicks</small></span>
+    <span class="rb-item rb-ore" title="@Lore.Ore in the bank / storage capacity"><span class="rb-k">@Lore.Ore</span> <b>@me.Resources</b><small>/ @me.StorageCapacity</small></span>
+    <span class="rb-item" title="@Lore.Ore banked in the last 60 ticks"><span class="rb-k">Income</span> <b>@me.IncomePerMinute</b><small>/min</small></span>
+    <span class="rb-item"><span class="rb-k">Workers</span> <b>@workers</b></span>
+    @if (Controller is not null)
+    {
+      var idle = Controller.IdleWorkers().Count;
+      <button type="button" class="idle-workers @(idle > 0 ? "on" : "")" disabled="@(idle == 0)" @onclick="Controller.JumpToIdleWorkerAsync"
+              title="@(idle == 0 ? "No idle workers" : $"Jump to an idle worker (I); press again for the next")"
+              aria-label="@(idle == 0 ? "No idle workers" : $"{idle} idle worker{(idle == 1 ? "" : "s")}: jump to one")">
+        <span class="idle-light" aria-hidden="true"></span>Idle <b>@idle</b>
+      </button>
+    }
+    <span class="rb-item"><span class="rb-k">Army</span> <b>@(mine.Count - workers)</b></span>
+    <span class="rb-item" title="Commands accepted by the server and waiting for a tick / queue capacity"><span class="rb-k">Server queue</span> <b>@me.QueuedCommands</b><small>/ @me.QueueCapacity</small></span>
+    @if (Session.Orders.Count > 0)
+    {
+      <span class="rb-item rb-pending" title="Orders waiting for the next tick's request"><span class="rb-k">To send</span> <b>@Session.Orders.Count</b></span>
+    }
+    @if (me.Upgrades.Count > 0)
+    {
+      <span class="rb-item rb-upgrades"><span class="rb-k">Upgrades</span> @string.Join(", ", me.Upgrades.Select(Lore.Upgrade))</span>
+    }
+    @if (s.Paused)
+    {
+      <span class="rb-item rb-paused">Paused</span>
+    }
+  }
+  else
+  {
+    <span class="rb-item muted">Connecting…</span>
+  }
+</div>
+
+@code {
+    [Parameter] public GameSession? Session { get; set; }
+    [Parameter] public Lore Lore { get; set; } = Lore.Classic;
+    [Parameter] public PlayController? Controller { get; set; }
+}

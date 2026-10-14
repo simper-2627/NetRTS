@@ -211,6 +211,18 @@ With no database configured the server keeps players and results in a local SQLi
 Docker installed, `aspire run` starts it against PostgreSQL with the Aspire dashboard, and the same
 setup deploys to Azure (App Service plus a private PostgreSQL) with `azd up`.
 
+### Or play it yourself
+
+The play client lets a person take a seat with mouse and keyboard, against a house badger or your
+own bot, as an ordinary API player: the same fogged state, the same tick, the same rate limits.
+
+```bash
+dotnet run --project play/NetRts.PlayClient    # http://localhost:5090, talks to the server on :5080
+```
+
+Register in its lobby, pick `sitter` and press *Play*, or open a match and point your bot at it.
+Controls and the rest: [docs/play-client.md](docs/play-client.md).
+
 <p align="center">
   <img src="docs/images/home.png" width="760" alt="The home page: start a scrimmage between two house badgers, watch live brawls, recent box scores and the Top Badgers ladder.">
 </p>
@@ -221,6 +233,7 @@ setup deploys to Azure (App Service plus a private PostgreSQL) with `azd up`.
 |---|---|
 | New players, first five minutes | [docs/getting-started.md](docs/getting-started.md): one page |
 | New players, first bot | [docs/tutorial/](docs/tutorial/README.md): step by step in C# or Python, with screenshots |
+| Playing by hand, testing your bot against a person | [docs/play-client.md](docs/play-client.md): running it, the lobby, controls |
 | Reference (and the field guide of campus names) | [docs/bot-guide.md](docs/bot-guide.md): every command, rule, stat and error code |
 | Teaching / contributors | [docs/how-it-works.md](docs/how-it-works.md): guided tour of the back end, with exercises |
 | Hosting | [docs/deploying.md](docs/deploying.md): local Aspire and Azure deployment |
@@ -237,12 +250,13 @@ Under the badgers, the engine is **NetRTS** (say "Net R-T-S"): a **Net**work **R
 | `src/NetRts.Engine` | The game: map generation, rules, pathfinding, the tick simulation, fog-of-war views, replays. Pure, deterministic C#. |
 | `src/NetRts.Protocol` | JSON contract shared by the server, SDK and bots. |
 | `src/NetRts.Server` | ASP.NET Core host: API keys, matchmaking, tick loops, long-poll state, live spectator stream, Elo, the spectator site. |
-| `src/NetRts.Server/wwwroot/lore.js` | The Snow College vocabulary: every name the spectator site shows. |
+| `src/NetRts.Web.Rendering` | The map renderer (2D canvas and 3D view), colour tokens and the Snow College vocabulary (`lore.js`), shared by the spectator site and the play client. |
+| `play/NetRts.PlayClient` | Blazor WebAssembly client for playing by hand ([docs/play-client.md](docs/play-client.md)); its own solution is `play/NetRts.Play.sln`. |
 | `src/NetRts.Bots` | C# SDK (`NetRtsClient`, `BotLoop`) and the house badgers. |
 | `src/NetRts.BotRunner` | Command-line runner for any house-badger strategy. |
 | `src/NetRts.AppHost`, `src/NetRts.ServiceDefaults` | .NET Aspire: local orchestration, Azure deployment, telemetry. |
 | `samples/python` | Standalone Python reference bot. |
-| `tests/` | Engine and API tests, including whole bot-vs-bot brawls and replay determinism. |
+| `tests/`, `play/NetRts.PlayClient.Tests` | Engine and API tests, including whole bot-vs-bot brawls and replay determinism; play client tests. |
 | `specs/001-rts-game-engine` | The original specification; [docs/requirements-coverage.md](docs/requirements-coverage.md) maps it to the code. |
 
 ```bash

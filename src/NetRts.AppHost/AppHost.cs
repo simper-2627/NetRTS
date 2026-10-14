@@ -48,6 +48,15 @@ var server = builder.AddProject<Projects.NetRts_Server>("server")
         site.SiteConfig.IsAlwaysOn = true;
     });
 
+if (builder.ExecutionContext.IsRunMode)
+{
+    // The manual play client (docs/play-client.md), locally only: a static WebAssembly site that talks
+    // to the server from the browser, at http://localhost:5080 (its default) here.
+    builder.AddProject<Projects.NetRts_PlayClient>("play")
+        .WaitFor(server)
+        .WithExternalHttpEndpoints();
+}
+
 if (builder.ExecutionContext.IsPublishMode)
 {
     // Discord sign-in (see docs/deploying.md). Locally the server reads these from its own user secrets.

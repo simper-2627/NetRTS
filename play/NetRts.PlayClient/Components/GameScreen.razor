@@ -1,0 +1,283 @@
+@* One match on screen: the session, the map view and the HUD. Keyed by match id in Pages/Play.razor,
+   so moving to another match builds a fresh one. *@
+@implements IAsyncDisposable
+@inject ServerConnection Server
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<PageTitle>@Title</PageTitle>
+
+<div class="game-screen">
+  <div class="game-top">
+    <ResourceBar Session="session" Lore="lore" Controller="controller" />
+    <GameControls Active="@(session?.State?.Status == MatchStatus.Active)" SpeedAdjustable="@(summary?.SpeedAdjustable == true)"
+                  Paused="Paused" TickIntervalMs="Interval" Error="@controlError"
+                  OnPause="p => ApplyAsync(() => controls!.SetPausedAsync(p))" OnStep="() => ApplyAsync(() => controls!.StepAsync())"
+                  OnSpeed="ms => ApplyAsync(() => controls!.SetSpeedAsync(ms))" OnSurrender="SurrenderAsync" />
+  </div>
+  @if (ShowWaitingRoom)
+  {
+    <div class="game-waiting">
+      <h1>@(summary?.Name ?? "Match")</h1>
+      @if (summary is not null)
+      {
+        <WaitingRoom Summary="summary" Server="@Server.Settings.Server" OnLeave="LeaveAsync" />
+      }
+    </div>
+  }
+  <div class="game-body" hidden="@ShowWaitingRoom">
+    <div class="map-frame" @ref="frame">
+      <canvas @ref="canvas" aria-hidden="true"></canvas>
+      <canvas @ref="overlay" class="map-input" tabindex="0" aria-label="Map. Left-click or drag to select, right-click to order, arrow keys to scroll, plus and minus to zoom."></canvas>
+      @if (Overlay is { } message)
+      {
+        <div class="overlay-msg"><div><strong>@message</strong></div></div>
+      }
+      <EndScreen Session="session" Lore="lore" Server="@Server.Settings.Server" />
+    </div>
+    <aside class="game-side" aria-label="Your base and events">
+      <canvas @ref="minimap" class="minimap" aria-label="Minimap: click to look there, right-click to send the selection"></canvas>
+      <SelectionPanel Session="session" Controller="controller" Lore="lore" />
+      <ProductionPanel Session="session" Lore="lore" />
+      <EventLog Session="session" Lore="lore" />
+      <Scoreboard Session="session" Lore="lore" />
+      <ControlsHelp Lore="lore" />
+    </aside>
+  </div>
+  @if (session?.Problem is { } problem)
+  {
+    <p class="game-problem" role="status">@problem</p>
+  }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid MatchId { get; set; }
+
+    private readonly CancellationTokenSource cts = new();
+    private ElementReference frame;
+    private ElementReference canvas;
+    private ElementReference overlay;
+    private ElementReference minimap;
+    private PlayView? view;
+    private PlayController? controller;
+    private DotNetObjectReference<PlayController>? input;
+    private GameSession? session;
+    private MatchControls? controls;
+    private bool? pausedOverride;
+    private int? intervalOverride;
+    private string? controlError;
+    private Lore lore = Lore.Classic;
+    private MatchSummaryDto? summary;
+    private string? startError;
+    private bool mapShown;
+    private RenderState? shown;
+
+    private bool ShowWaitingRoom => session?.Phase is null or SessionPhase.Connecting or SessionPhase.Waiting && summary?.Status == MatchStatus.Waiting;
+
+    private string Title => session?.State is { } s ? $"Tick {s.Tick} – {lore.Game}" : summary?.Name ?? "Match";
+
+    private string? Overlay => startError ?? session?.Phase switch
+    {
+        null or SessionPhase.Connecting or SessionPhase.Waiting => "Waiting for the match to start…",
+        SessionPhase.Failed => session.Problem ?? "Something went wrong.",
+        SessionPhase.Playing when Paused => "Paused",
+        _ => null,
+    };
+
+    /// <summary>The speed as the last speed call left it, until /state catches up (a paused long-poll takes up to 30 s to return).</summary>
+    private bool Paused => pausedOverride ?? session?.State?.Paused ?? false;
+
+    private int Interval => intervalOverride ?? session?.State?.TickIntervalMs ?? 1000;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        await Server.Settings.LoadAsync();
+        if (Server.Settings.ApiKey is null)
+        {
+            startError = "Register or paste your API key in the lobby first.";
+            StateHasChanged();
+            return;
+        }
+
+        session = new GameSession(Server.Client, MatchId);
+        controls = new MatchControls(Server.Http, MatchId);
+        controller = new PlayController(session)
+        {
+            PauseToggle = () => summary?.SpeedAdjustable == true && session.State?.Status == MatchStatus.Active
+                ? ApplyAsync(() => controls.SetPausedAsync(!Paused))
+                : Task.CompletedTask,
+        };
+        input = DotNetObjectReference.Create(controller);
+        view = await PlayView.CreateAsync(JS, frame, canvas, overlay, minimap, input);
+        controller.Attach(view);
+        controller.Changed += OnControllerChanged;
+        lore = view.Lore;
+        session.Updated += OnUpdatedAsync;
+        _ = PollSummaryAsync(cts.Token);
+        _ = RunSessionAsync(session, cts.Token);
+    }
+
+    private async Task RunSessionAsync(GameSession s, CancellationToken ct)
+    {
+        try
+        {
+            await s.RunAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (Exception e) when (e is HttpRequestException or NetRts.Bots.NetRtsApiException)
+        {
+            startError ??= s.Problem ?? ApiErrors.Describe(e, Server.Settings.Server);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>The waiting room's seat list. Only until the first tick: the game itself reads nothing but /state.</summary>
+    private async Task PollSummaryAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested && session?.Phase is null or SessionPhase.Connecting or SessionPhase.Waiting)
+        {
+            try
+            {
+                summary = await Server.Client.GetMatchAsync(MatchId, ct);
+                await InvokeAsync(StateHasChanged);
+                await Task.Delay(2000, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception e) when (e is HttpRequestException or NetRts.Bots.NetRtsApiException)
+            {
+                startError = ApiErrors.Describe(e, Server.Settings.Server);
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+        }
+
+        // Once more now it has started: whether the speed may be changed depends on who took the seats.
+        try
+        {
+            summary = await Server.Client.GetMatchAsync(MatchId, ct);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception e) when (e is HttpRequestException or NetRts.Bots.NetRtsApiException or OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task ApplyAsync(Func<Task<MatchSummaryDto>> call)
+    {
+        controlError = null;
+        try
+        {
+            var now = await call();
+            pausedOverride = now.Paused;
+            intervalOverride = now.TickIntervalMs;
+        }
+        catch (Exception e) when (e is HttpRequestException or NetRts.Bots.NetRtsApiException)
+        {
+            controlError = ApiErrors.Describe(e, Server.Settings.Server);
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SurrenderAsync()
+    {
+        try
+        {
+            await Server.Client.SurrenderAsync(MatchId);
+        }
+        catch (Exception e) when (e is HttpRequestException or NetRts.Bots.NetRtsApiException)
+        {
+            controlError = ApiErrors.Describe(e, Server.Settings.Server);
+        }
+    }
+
+    private async Task OnUpdatedAsync()
+    {
+        if (view is null || session is null)
+        {
+            return;
+        }
+
+        if (!mapShown && session.Map is { } map && session.State is { } state)
+        {
+            mapShown = true;
+            await view.SetMapAsync(map);
+            await view.SetVisionAsync(state.You.Slot);
+            // Start zoomed in on your own base, as RTS games do; the minimap shows the rest.
+            var home = state.Buildings.Where(b => b.Owner == state.You.Slot && b.Type == BuildingType.CommandCenter).OrderBy(b => b.Id).FirstOrDefault();
+            var start = home is not null ? new PositionDto(home.X, home.Y) : state.Players.FirstOrDefault(p => p.Slot == state.You.Slot)?.StartPosition;
+            if (start is not null)
+            {
+                await view.LookAtAsync(start.X, start.Y);
+            }
+        }
+
+        await view.RetellAsync(session.Events.Take(60).Select(e => e.Message).Concat(session.Outcomes.Select(o => o.Message ?? "")));
+
+        if (mapShown && session.Render is { } render && !ReferenceEquals(render, shown))
+        {
+            shown = render;
+            if (session.State is { } fresh)
+            {
+                // The state has caught up with the last speed change.
+                pausedOverride = fresh.Paused == pausedOverride ? null : pausedOverride;
+                intervalOverride = fresh.TickIntervalMs == intervalOverride ? null : intervalOverride;
+            }
+
+            await view.SetStateAsync(render);
+            if (session.State is { } current && controller is not null)
+            {
+                await controller.OnStateAsync(current);
+            }
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OnControllerChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task LeaveAsync()
+    {
+        try
+        {
+            await Server.Client.LeaveMatchAsync(MatchId);
+            Nav.NavigateTo("");
+        }
+        catch (Exception e) when (e is HttpRequestException or NetRts.Bots.NetRtsApiException)
+        {
+            startError = ApiErrors.Describe(e, Server.Settings.Server);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await cts.CancelAsync();
+        cts.Dispose();
+        if (session is not null)
+        {
+            session.Updated -= OnUpdatedAsync;
+        }
+
+        if (controller is not null)
+        {
+            controller.Changed -= OnControllerChanged;
+        }
+
+        if (view is not null)
+        {
+            await view.DisposeAsync();
+        }
+
+        input?.Dispose();
+    }
+}

@@ -1,0 +1,37 @@
+@* A row of command-card buttons: name, cost, hotkey; unavailable ones say why. *@
+
+@if (Buttons.Count > 0)
+{
+  <h3 class="card-h">@Title</h3>
+  <div class="card-grid">
+    @foreach (var b in Buttons)
+    {
+      var name = Name(b.Action);
+      <button type="button" class="card-btn @(b.Blocked is null ? "" : "blocked")" aria-disabled="@(b.Blocked is not null)"
+              title="@(b.Blocked ?? $"{name}: {b.Cost} {Lore.Ore}")" @onclick="e => Controller.PressAsync(b, e.ShiftKey)">
+        <span class="card-name">@name</span>
+        <span class="card-cost">@b.Cost</span>
+        <kbd>@b.Hotkey</kbd>
+        @if (b.Blocked is { } why)
+        {
+          <span class="card-why">@why</span>
+        }
+      </button>
+    }
+  </div>
+}
+
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter, EditorRequired] public IReadOnlyList<CardButton> Buttons { get; set; } = [];
+    [Parameter, EditorRequired] public PlayController Controller { get; set; } = null!;
+    [Parameter] public Lore Lore { get; set; } = Lore.Classic;
+
+    private string Name(CardAction action) => action switch
+    {
+        BuildAction b => Lore.Building(b.Type),
+        ProduceAction p => Lore.Unit(p.Type),
+        ResearchAction r => Lore.Upgrade(r.Upgrade),
+        _ => "?",
+    };
+}

@@ -1,6 +1,6 @@
 // Account page: Discord sign-in, the bots you own, and (for Discord server admins) league matches.
-import { api, html, setHtml, playerLabel, verifiedBadge, fmt } from './util.js';
-import { GAME, say } from './lore.js';
+import { api, html, setHtml, playerLabel, verifiedBadge, fmt } from './_content/NetRts.Web.Rendering/util.js';
+import { GAME, say } from './_content/NetRts.Web.Rendering/lore.js';
 
 const CATEGORIES = ['Practice', 'Preseason', 'Season', 'Championship'];
 const SIGN_IN = '/auth/discord?returnUrl=' + encodeURIComponent('/#/account');

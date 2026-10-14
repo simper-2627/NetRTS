@@ -1,7 +1,7 @@
 // Spectate view: #/match/{id} or #/match/{name}
-import { api, html, setHtml, esc, slotVar, displayName, playerLabel, fmt, outcomeText } from './_content/NetRts.Web.Rendering/util.js';
-import { GAME, SNOW, say, ORE, unitName, buildingName, upgradeName, badgerize, hqName, housingName } from './_content/NetRts.Web.Rendering/lore.js';
-import { MapView, unitPath } from './_content/NetRts.Web.Rendering/mapview.js';
+import { api, html, setHtml, esc, slotVar, displayName, playerLabel, fmt, outcomeText } from './util.js';
+import { GAME, SNOW, say, ORE, unitName, buildingName, buildingRole, upgradeName, badgerize, hqName, housingName } from './lore.js';
+import { MapView, unitPath } from './mapview.js';
 
 const HOT = /Lost|Destroyed|Killed|Eliminated|Failed/;
 
@@ -50,6 +50,7 @@ export function mountSpectate(root, matchKey) {
             <button type="button" id="fly" aria-pressed="false" title="Free flight: mouse to look, WASD to move, E/Q up and down, Shift for speed, Esc to land" hidden>Fly</button>
             <button type="button" id="grid3d" aria-pressed="false" title="Show the tile grid" hidden>Grid</button>
             <button type="button" id="quality3d" title="Graphics quality" hidden>Quality</button>
+            <button type="button" id="sound3d" aria-expanded="false" aria-controls="sound-panel" title="Music, sound effects and voices" hidden>Sound</button>
             <span class="zoom-level" id="zoom-level" aria-live="polite">1×</span>
             <button type="button" id="fullscreen" aria-pressed="false" title="Full screen (G)">Full screen</button>
           </div>
@@ -80,6 +81,20 @@ export function mountSpectate(root, matchKey) {
               <ol class="fs-feed" id="fs-feed"></ol>
             </div>
           </section>
+          <div class="sound-panel" id="sound-panel" role="group" aria-label="Sound" hidden>
+            <label class="sound-row sound-mute"><input type="checkbox" id="snd-on"> Sound on</label>
+            <label class="sound-row" for="snd-music">Music <output id="snd-music-v"></output></label>
+            <input type="range" id="snd-music" min="0" max="100" step="5">
+            <label class="sound-row" for="snd-sfx">Sound effects <output id="snd-sfx-v"></output></label>
+            <input type="range" id="snd-sfx" min="0" max="100" step="5">
+            <label class="sound-row" for="snd-voice">Voices <output id="snd-voice-v"></output></label>
+            <input type="range" id="snd-voice" min="0" max="100" step="5">
+            <label class="sound-row sound-mute"><input type="checkbox" id="snd-captions"> Show what players say</label>
+            <p class="small muted sound-note">Effects are only heard for what's on screen, quieter further away. Each player has their own voice.
+              Voices: <a href="https://huggingface.co/hexgrad/Kokoro-82M" target="_blank" rel="noopener">Kokoro</a> through LocalAI,
+              and <a href="https://github.com/OHF-Voice/piper1-gpl" target="_blank" rel="noopener">Piper</a> with the
+              <a href="https://datashare.ed.ac.uk/handle/10283/3443" target="_blank" rel="noopener">VCTK corpus</a> (CC BY 4.0).</p>
+          </div>
           <div class="tooltip" id="tooltip" role="status" hidden></div>
           <div class="overlay-msg" id="overlay"><div><strong>${say('Loading map…', 'Unrolling the Sanpete Valley…')}</strong></div></div>
           <div class="gameover" id="gameover" role="dialog" aria-labelledby="go-title" hidden></div>
@@ -167,7 +182,8 @@ export function mountSpectate(root, matchKey) {
     const owner = (slot) => html`<span class="pname" style="--pc:${slotVar(slot)}">${who.get(slot) ?? `Player ${slot + 1}`}</span>`;
     const items = [];
     for (const b of info.buildings) {
-      items.push(html`<div class="tt-item"><b>${buildingName(b.type, b.owner)}</b> #${b.id} ${owner(b.owner)}<br>
+      items.push(html`<div class="tt-item"><b>${buildingName(b.type, b.owner)}</b> #${b.id} ${owner(b.owner)}
+        <span class="tt-role">${buildingRole(b.type)}</span>
         HP ${fmt(b.hp)} / ${fmt(b.maxHp)}${b.completed ? '' : html`<br>Under construction, ${b.constructionPercent}%`}
         ${b.production?.length ? html`<br>${say('Producing', 'Training')} ${b.production.map((p) => `${unitName(p.unitType)} ${p.percent}%`).join(', ')}` : ''}
         ${b.research ? html`<br>${say('Researching', 'Studying')} ${upgradeName(b.research.upgrade)} ${b.research.percent}%` : ''}</div>`);
@@ -345,7 +361,8 @@ export function mountSpectate(root, matchKey) {
   let cardKey = '';
   function render3dControls() {
     btn3d.setAttribute('aria-pressed', String(is3d));
-    for (const b of [flyBtn, gridBtn, qualityBtn]) b.hidden = !is3d;
+    for (const b of [flyBtn, gridBtn, qualityBtn, soundBtn]) b.hidden = !is3d;
+    if (!is3d) showSoundPanel(false);
     for (const id of ['zoom-in', 'zoom-out', 'zoom-fit', 'follow']) $(id).hidden = false;
     $('map-help').hidden = is3d;
     $('map-help-3d').hidden = !is3d;
@@ -375,16 +392,23 @@ export function mountSpectate(root, matchKey) {
   }
   async function set3d(on) {
     if (on && !view3d) {
+      // Building the scene keeps the browser busy for a moment on a slow computer: say so first.
+      setOverlay(say('Building the 3D view…', 'Building the 3D valley…'), 'This takes a few seconds the first time.', true);
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+      if (!alive) return;
       try {
-        const { View3D } = await import('./_content/NetRts.Web.Rendering/3d/view.js');
+        const { View3D } = await import('./3d/view.js');
         if (!alive) return;
-        view3d = new View3D(box3d, { badger: SNOW, names });
+        const { GameAudio } = await import('./3d/audio.js');
+        audio ??= new GameAudio();
+        view3d = new View3D(box3d, { badger: SNOW, names, audio });
         box3d.view3d = view3d;   // handy from the dev tools console
       } catch (e) {
         setOverlay('The 3D view could not start', e?.message || 'This browser may not support WebGL.');
         later(() => setOverlay(null), 3500);
         return;
       }
+      view3d.onReady = () => { if (alive) setOverlay(null); };
       view3d.onModeChange = () => render3dControls();
       view3d.onQualityChange = () => render3dControls();
       view3d.onFollowChange = (u) => renderCard(u);
@@ -398,6 +422,8 @@ export function mountSpectate(root, matchKey) {
       view3d.setVision(view.vision);
     }
     is3d = on;
+    audio?.setActive(on);
+    renderSound();
     frame.classList.toggle('is-3d', on);
     canvas.hidden = on;
     box3d.hidden = !on;
@@ -409,6 +435,45 @@ export function mountSpectate(root, matchKey) {
     if (on) view3d.renderer.domElement.focus({ preventScroll: true });
   }
   btn3d.addEventListener('click', () => set3d(!is3d));
+
+  // ---------- sound (3D view only): music, effects and voices, each with its own volume
+  let audio = null;
+  const soundBtn = $('sound3d'), soundPanel = $('sound-panel');
+  const SOUND_KEYS = ['music', 'sfx', 'voice'];
+  function renderSound() {
+    if (!audio) return;
+    const st = audio.settings;
+    $('snd-on').checked = !st.muted;
+    $('snd-captions').checked = st.captions;
+    for (const k of SOUND_KEYS) {
+      $(`snd-${k}`).value = String(Math.round(st[k] * 100));
+      $(`snd-${k}-v`).textContent = `${Math.round(st[k] * 100)}%`;
+    }
+    soundBtn.textContent = st.muted ? 'Sound: off' : 'Sound';
+    soundBtn.setAttribute('aria-pressed', String(!st.muted));
+  }
+  function showSoundPanel(on) {
+    soundPanel.hidden = !on;
+    soundBtn.setAttribute('aria-expanded', String(on));
+    if (on) renderSound();
+  }
+  soundBtn.addEventListener('click', (e) => { e.stopPropagation(); audio?.unlock(); showSoundPanel(soundPanel.hidden); });
+  soundPanel.addEventListener('input', (e) => {
+    if (!audio) return;
+    const k = SOUND_KEYS.find((x) => e.target.id === `snd-${x}`);
+    if (k) { audio.set(k, Number(e.target.value) / 100); if (audio.settings.muted && audio.settings[k] > 0) audio.set('muted', false); }
+    if (e.target.id === 'snd-on') audio.set('muted', !e.target.checked);
+    if (e.target.id === 'snd-captions') audio.set('captions', e.target.checked);
+    audio.unlock();
+    renderSound();
+  });
+  soundPanel.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); showSoundPanel(false); soundBtn.focus(); } });
+  const onDocDown = (e) => {
+    audio?.unlock();   // browsers only start sound once the viewer clicks or presses a key
+    if (!soundPanel.hidden && !soundPanel.contains(e.target) && e.target !== soundBtn) showSoundPanel(false);
+  };
+  document.addEventListener('pointerdown', onDocDown);
+  document.addEventListener('keydown', onDocDown);
   flyBtn.addEventListener('click', () => view3d?.setMode(view3d.mode === 'fly' ? 'orbit' : 'fly'));
   gridBtn.addEventListener('click', () => { view3d?.setGrid(!view3d.grid); render3dControls(); });
   qualityBtn.addEventListener('click', () => {
@@ -688,10 +753,10 @@ export function mountSpectate(root, matchKey) {
     });
   }
 
-  function setOverlay(title, body) {
+  function setOverlay(title, body, busy = false) {
     if (!title) { overlay.hidden = true; return; }
     overlay.hidden = false;
-    setHtml(overlay, html`<div><strong>${title}</strong>${body ? html`<span>${body}</span>` : ''}</div>`);
+    setHtml(overlay, html`<div>${busy ? html`<span class="spinner" aria-hidden="true"></span>` : ''}<strong>${title}</strong>${body ? html`<span>${body}</span>` : ''}</div>`);
   }
 
   // ---------- data flow
@@ -1161,7 +1226,19 @@ export function mountSpectate(root, matchKey) {
   });
 
   start();
-  try { if (localStorage.getItem('netrts.view') === '3d') set3d(true); } catch { /* storage blocked */ }
+  let want3d = false;
+  try { want3d = localStorage.getItem('netrts.view') === '3d'; } catch { /* storage blocked */ }
+  if (want3d) set3d(true);
+  else {
+    // Fetch the 3D view's code while the viewer watches in 2D, so pressing 3D doesn't wait on the network.
+    const fetch3d = () => {
+      if (!alive || view3d) return;
+      import('./3d/view.js').catch(() => {});
+      import('./3d/audio.js').catch(() => {});
+    };
+    if ('requestIdleCallback' in window) requestIdleCallback(fetch3d, { timeout: 5000 });
+    else later(fetch3d, 2500);
+  }
 
   return () => {
     alive = false;
@@ -1172,6 +1249,9 @@ export function mountSpectate(root, matchKey) {
     window.removeEventListener('resize', fit);
     scheme.removeEventListener('change', onScheme);
     document.removeEventListener('fullscreenchange', onFullscreenChange);
+    document.removeEventListener('pointerdown', onDocDown);
+    document.removeEventListener('keydown', onDocDown);
+    audio?.dispose();
     document.documentElement.classList.remove('map-full');
     if (document.fullscreenElement === frame) document.exitFullscreen().catch(() => {});
     view.destroy();

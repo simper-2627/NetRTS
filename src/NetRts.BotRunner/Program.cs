@@ -104,20 +104,34 @@ namespace NetRts.BotRunner
             var match = await EnterMatchAsync(client, o, ct);
             var matchId = match.MatchId;
 
-            await WaitForStartAsync(client, matchId, ct);
-
-            var strategy = new ProgressLogger(HouseBots.Create(o.Strategy), Log);
-            Log($"Match started. Playing with strategy '{o.Strategy}'.");
-            var result = await BotLoop.RunAsync(client, matchId, strategy, Log, ct);
-            if (result is null)
+            // A league match is played in rounds: after each heat, wait for the admin to start the next.
+            var league = match.Heats is not null;
+            while (true)
             {
-                ct.ThrowIfCancellationRequested();
-                Console.Error.WriteLine("error: the bot loop ended before the match completed.");
-                return 1;
-            }
+                if (!await WaitForStartAsync(client, matchId, league, ct))
+                {
+                    Log("The admin has closed the match; there are no more rounds.");
+                    return 0;
+                }
 
-            PrintResult(result, strategy.Slot);
-            return 0;
+                var strategy = new ProgressLogger(HouseBots.Create(o.Strategy), Log);
+                Log($"Match started. Playing with strategy '{o.Strategy}'.");
+                var result = await BotLoop.RunAsync(client, matchId, strategy, Log, ct);
+                if (result is null)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    Console.Error.WriteLine("error: the bot loop ended before the match completed.");
+                    return 1;
+                }
+
+                PrintResult(result, strategy.Slot);
+                if (!league)
+                {
+                    return 0;
+                }
+
+                Log("Staying in the league match for its next round. (Ctrl+C to quit)");
+            }
         }
 
         private static async Task<MatchSummaryDto> EnterMatchAsync(NetRtsClient client, RunnerOptions o, CancellationToken ct)
@@ -152,7 +166,7 @@ namespace NetRts.BotRunner
                     var match = await client.JoinMatchAsync(matchId, ct);
                     Log(match.Heats is null
                         ? $"Joined match {match.MatchId} ({match.Players.Count}/{match.MaxPlayers} seats taken, {Describe(match)})."
-                        : $"Joined {match.Category} match {match.Name} ({match.Players.Count} in so far). It starts when the admin starts the heats.");
+                        : $"Joined {match.Category} match {match.Name} ({match.Players.Count} in so far). It starts when the admin starts the first round.");
                     return match;
                 }
             }
@@ -161,8 +175,11 @@ namespace NetRts.BotRunner
         private static string Describe(MatchSummaryDto m) =>
             $"{m.MapWidth}x{m.MapHeight} map, seed {m.Seed}, {m.TickIntervalMs} ms/tick, max {m.MaxTicks} ticks";
 
-        /// <summary>Long-polls until the match has been created (it starts once every seat is filled).</summary>
-        private static async Task WaitForStartAsync(NetRtsClient client, Guid matchId, CancellationToken ct)
+        /// <summary>
+        /// Long-polls until the match has been created (it starts once every seat is filled), or for a
+        /// league match until the admin starts the next round. False once a league match has been closed.
+        /// </summary>
+        private static async Task<bool> WaitForStartAsync(NetRtsClient client, Guid matchId, bool league, CancellationToken ct)
         {
             var announced = false;
             while (true)
@@ -170,13 +187,17 @@ namespace NetRts.BotRunner
                 try
                 {
                     await client.GetStateAsync(matchId, waitForTick: 0, ct: ct);
-                    return;
+                    return true;
+                }
+                catch (NetRtsApiException ex) when (ex.Code == "MATCH_FINISHED")
+                {
+                    return false;
                 }
                 catch (NetRtsApiException ex) when (ex.Code == "MATCH_NOT_STARTED")
                 {
                     if (!announced)
                     {
-                        Log("Waiting for the match to fill up... (Ctrl+C to quit)");
+                        Log(league ? "Waiting for the admin to start the round... (Ctrl+C to quit)" : "Waiting for the match to fill up... (Ctrl+C to quit)");
                         announced = true;
                     }
                 }

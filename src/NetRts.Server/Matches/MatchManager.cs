@@ -23,6 +23,9 @@ public sealed class HouseBotDirectory
 
     public void Register(string bot, Guid playerId) => _ids[bot] = playerId;
 
+    /// <summary>Every house bot's player id.</summary>
+    public IReadOnlyCollection<Guid> Ids => [.. _ids.Values];
+
     public Guid IdOf(string bot) =>
         _ids.TryGetValue(bot, out var id) ? id : throw new InvalidOperationException($"House bot {bot} was not seeded.");
 
@@ -149,6 +152,7 @@ public sealed partial class MatchManager(
 
             var host = NewHost(name, null, seats.Count, settings, isExhibition: false, category);
             host.ParentMatchId = parentMatchId;
+            host.KeepSeatOrder = true;
             foreach (var seat in seats)
             {
                 host.TryJoin(seat);
@@ -397,7 +401,8 @@ public sealed partial class MatchManager(
 }
 
 /// <summary>Periodically tidies <see cref="MatchManager"/> and <see cref="LeagueMatchManager"/>.</summary>
-public sealed class MatchHousekeeper(MatchManager manager, LeagueMatchManager leagues, TimeProvider time) : BackgroundService
+public sealed class MatchHousekeeper(MatchManager manager, LeagueMatchManager leagues, LeagueFinalizer finalizer, TimeProvider time,
+    ILogger<MatchHousekeeper> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -406,6 +411,14 @@ public sealed class MatchHousekeeper(MatchManager manager, LeagueMatchManager le
         {
             manager.Housekeep(time.GetUtcNow().UtcDateTime);
             leagues.Housekeep(time.GetUtcNow().UtcDateTime);
+            try
+            {
+                await finalizer.SweepAsync(time.GetUtcNow().UtcDateTime, stoppingToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Finalizing league matches failed");
+            }
         }
     }
 }

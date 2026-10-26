@@ -23,6 +23,9 @@ public sealed record AccountDto
     /// <summary>The bots this account has claimed.</summary>
     public IReadOnlyList<PlayerProfileDto> Bots { get; init; } = [];
 
+    /// <summary>Every achievement any of their bots has earned, once each, with the bots that earned it.</summary>
+    public IReadOnlyList<EarnedAchievementDto> Achievements { get; init; } = [];
+
     /// <summary>Admins only: Azure portal links to the server's telemetry (empty when not configured).</summary>
     public IReadOnlyList<TelemetryLinkDto> TelemetryLinks { get; init; } = [];
 }
@@ -43,6 +46,9 @@ public sealed record AccountProfileDto
 
     /// <summary>Discord server administrators are game admins.</summary>
     public bool IsAdmin { get; init; }
+
+    /// <summary>Their public profile's name (#/player/{slug}) when they're verified.</summary>
+    public string? ProfileSlug { get; init; }
 }
 
 public sealed record ClaimBotRequest
@@ -56,9 +62,10 @@ public static class AccountEndpoints
 {
     public static void MapAccountEndpoints(this IEndpointRouteBuilder app)
     {
+        // IsPersistent: the sign-in cookie outlives the browser session (30 days, sliding), not just this window.
         app.MapGet("/auth/discord", (IOptions<DiscordOptions> discord, string? returnUrl) =>
                 discord.Value.Enabled
-                    ? Results.Challenge(new AuthenticationProperties { RedirectUri = SafeReturnUrl(returnUrl) }, [Accounts.DiscordScheme])
+                    ? Results.Challenge(new AuthenticationProperties { RedirectUri = SafeReturnUrl(returnUrl), IsPersistent = true }, [Accounts.DiscordScheme])
                     : ApiErrors.Error(404, "DISCORD_DISABLED", "Discord sign-in isn't configured on this server."))
             .ExcludeFromDescription();
 
@@ -127,8 +134,11 @@ public static class AccountEndpoints
                 InServer = record.InServer,
                 Verified = Accounts.IsVerified(record, discord),
                 IsAdmin = record.IsAdmin,
+                ProfileSlug = (await ProfileSlugs.LoadAsync(db, discord, ct)).Of(record.Id),
             },
             Bots = await PlayerEndpoints.ProfilesAsync(db, discord, db.Players.Where(p => p.OwnerAccountId == record.Id), ct),
+            Achievements = await AchievementEndpoints.EarnedAsync(db,
+                db.BotAchievements.Where(a => db.Players.Any(p => p.Id == a.PlayerId && p.OwnerAccountId == record.Id)), listBots: true, ct),
             TelemetryLinks = record.IsAdmin ? Endpoints.TelemetryLinks.For(netRts.Value) : [],
         };
     }

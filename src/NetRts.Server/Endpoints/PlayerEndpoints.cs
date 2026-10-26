@@ -40,7 +40,7 @@ public static partial class PlayerEndpoints
             .WithSummary("A player's public profile.");
 
         api.MapGet("/leaderboard", Leaderboard)
-            .WithSummary("One category's ladder: Practice (default; by Elo rating, only player-vs-player 1v1s move it), Preseason, Season or Championship (by league points, then rating). Add season=<label> for a past season.");
+            .WithSummary("One category's ladder: Practice (default; by Elo rating, only player-vs-player 1v1s move it), Preseason, Season or Championship (by league points, then skill). Add season=<label> for a past season.");
 
         api.MapGet("/rules", () => GameRules.ToDto())
             .WithSummary("Every unit, building and upgrade stat, plus the core rules.");
@@ -100,13 +100,19 @@ public static partial class PlayerEndpoints
         var ids = players.Select(p => p.Id).ToList();
         var stats = (await db.PlayerStats.AsNoTracking().Where(s => ids.Contains(s.PlayerId) && s.Season == Seasons.Current).ToListAsync(ct))
             .ToLookup(s => s.PlayerId);
+        var slugs = await ProfileSlugs.LoadAsync(db, discord, ct);
 
         return players.Select(p =>
         {
             var records = Enum.GetValues<MatchCategory>().Select(category =>
             {
                 var s = stats[p.Id].FirstOrDefault(s => s.Category == category) ?? new PlayerStatsRecord { Category = category };
-                return new CategoryRecordDto { Category = category, Rating = s.Rating, Wins = s.Wins, Losses = s.Losses, Draws = s.Draws, Points = s.Points };
+                var skill = OpenSkill.Of(s);
+                return new CategoryRecordDto
+                {
+                    Category = category, Rating = s.Rating, Wins = s.Wins, Losses = s.Losses, Draws = s.Draws, Points = s.Points,
+                    Skill = OpenSkill.Display(skill.Mu, skill.Sigma), Mu = skill.Mu, Sigma = skill.Sigma,
+                };
             }).ToList();
             var practice = records[0];
             var verified = Accounts.IsVerified(p.Owner, discord);
@@ -122,32 +128,39 @@ public static partial class PlayerEndpoints
                 CreatedAt = new DateTimeOffset(DateTime.SpecifyKind(p.CreatedAt, DateTimeKind.Utc)),
                 Verified = verified,
                 OwnerName = verified ? p.Owner!.DisplayName : null,
+                OwnerSlug = verified ? slugs.Of(p.Owner!.Id) : null,
                 Records = records,
+                Skill = practice.Skill,
             };
         }).ToList();
     }
 
-    private static async Task<IReadOnlyList<LeaderboardEntryDto>> Leaderboard(
+    internal static async Task<IReadOnlyList<LeaderboardEntryDto>> Leaderboard(
         NetRtsDb db, IOptions<DiscordOptions> discord, CancellationToken ct, MatchCategory category = MatchCategory.Practice, int limit = 50, string? season = null)
     {
         season ??= Seasons.Current;
         // Each category is its own ladder. House bots always appear on the practice ladder as yardsticks.
-        // Practice is ranked by rating; league categories by points, then rating. ?season= shows a past season.
+        // Practice is ranked by rating; league categories by points, then skill (its conservative estimate). ?season= shows a past season.
         var league = category != MatchCategory.Practice;
+        var unranked = discord.Value.UnrankedAccounts;
         var rows = await db.Players.AsNoTracking()
             .Select(p => new { Player = p, p.Owner, Stats = db.PlayerStats.FirstOrDefault(s => s.PlayerId == p.Id && s.Category == category && s.Season == season) })
+            .Where(x => x.Owner == null || !unranked.Contains(x.Owner.DiscordId))
             .Where(x => (x.Stats != null && x.Stats.Wins + x.Stats.Losses + x.Stats.Draws > 0)
                         || (category == MatchCategory.Practice && season == Seasons.Current && x.Player.IsHouseBot))
             .OrderByDescending(x => league && x.Stats != null ? x.Stats.Points : 0)
+            .ThenByDescending(x => league && x.Stats != null ? x.Stats.Mu - 3 * x.Stats.Sigma : 0)
             .ThenByDescending(x => x.Stats == null ? Elo.InitialRating : x.Stats.Rating)
             .ThenByDescending(x => x.Stats == null ? 0 : x.Stats.Wins)
             .ThenBy(x => x.Player.Name)
             .Take(Math.Clamp(limit, 1, 200))
             .ToListAsync(ct);
 
+        var slugs = await ProfileSlugs.LoadAsync(db, discord.Value, ct);
         return rows.Select((x, i) =>
         {
             var verified = Accounts.IsVerified(x.Owner, discord.Value);
+            var skill = x.Stats is null ? OpenSkill.Initial : OpenSkill.Of(x.Stats);
             return new LeaderboardEntryDto
             {
                 Rank = i + 1,
@@ -159,8 +172,12 @@ public static partial class PlayerEndpoints
                 Losses = x.Stats?.Losses ?? 0,
                 Draws = x.Stats?.Draws ?? 0,
                 Points = x.Stats?.Points ?? 0,
+                Skill = OpenSkill.Display(skill.Mu, skill.Sigma),
+                Mu = skill.Mu,
+                Sigma = skill.Sigma,
                 Verified = verified,
                 OwnerName = verified ? x.Owner!.DisplayName : null,
+                OwnerSlug = verified ? slugs.Of(x.Owner!.Id) : null,
             };
         }).ToList();
     }

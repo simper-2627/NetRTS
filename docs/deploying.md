@@ -179,12 +179,22 @@ Without it the callback URL it sends to Discord starts with `http://` and Discor
 AppHost sets it for `azd` deployments. Sign-in cookies are encrypted with keys stored in the
 database (`data_protection_keys`), so restarts and redeploys don't sign anyone out.
 
+People who play but don't compete (the instructor) go in `Discord:UnrankedAccounts`, a list of Discord
+user ids (in `appsettings.json`). Their bots still play, but stay off every ladder and the trophy room,
+never earn achievements, and lose any they had the next time the server starts.
+
 ## Announcing results in Discord
 
-The shared server posts finished matches to the coding-competition channel:
+The shared server posts to the coding-competition channel:
 
+- **A new league match** (preseason, season, championship): its name and a link, as soon as an
+  admin creates it, so people can point their bots at it.
 - **League matches:** one message once every heat has finished, with each heat's top four and
   their points, linking to the match's scoreboard page.
+- **Achievements:** the first bot ever to earn each one, straight away; and every night at
+  midnight, a digest of everything earned that day, bot by bot.
+- **The nightly recap:** last night's episode, with its poster and a link, at 6:30 a.m. local time
+  (`Recap__AnnounceAt`), or as soon as it's published if that's later in the day. Once per episode.
 - **Practice between real bots:** one short message each.
 - **Practice against house bots:** one digest every hour (`Discord__ResultsDigestMinutes`).
 - **House-bot exhibitions:** nothing.
@@ -240,6 +250,51 @@ To see how much space frames use, and to drop old ones (their matches, results a
 SELECT count(*), pg_size_pretty(sum(octet_length("Data"))) FROM match_frame_chunks;  -- PostgreSQL
 DELETE FROM match_frames WHERE "CreatedAt" < now() - interval '180 days';            -- chunks go with them
 ```
+
+## Nightly recap show
+
+A Container Apps job makes a highlights video every night (see [`recap/README.md`](../recap/README.md))
+and uploads it to blob storage. The server lists it on the home page and `#/recaps` by itself: the
+job tells it directly, and the server also checks storage every 5 minutes, adding any episode it
+doesn't have and removing any whose video was deleted. Nobody has to manage the list.
+
+| Resource (rg-netrts, West US 3) | Purpose |
+|---|---|
+| `netrts-ai` (Foundry, `AIServices`) | Azure OpenAI deployment `recap-writer` (gpt-5.5, 50K tokens/minute) writes the script; Azure AI Speech voices the hosts. Keyless: managed identities only. |
+| `netrtsrecaps…` storage account, private `recaps` container | The videos, posters and each episode's `episode.json`. No public access, no shared keys; the server signs short-lived read links. |
+| `netrtsrecap…` container registry (Basic) | The job's image, built in Azure with `az acr build`. |
+| `id-netrts-recap` | The job's identity: blob writer, Cognitive Services User and OpenAI User on `netrts-ai`, AcrPull. |
+| `netrts-recap-env` + `netrts-recap` job | Consumption Container Apps. Runs at 09:00 UTC (2 a.m. MST), 2 vCPUs, up to 2 hours; logs to `netrts-logs`. |
+
+Why not Claude: Claude on Foundry is an Azure Marketplace purchase, and the faculty subscription
+(education credits) is refused ("can't be purchased using a free subscription"). Azure OpenAI models
+are billed to the subscription itself. To use another model, list what's available with
+`az cognitiveservices model list -l westus3` and pass `writerModel`/`writerModelVersion` to the template.
+
+**Setting it up** (done once; safe to run again):
+
+```bash
+deploy/recap/setup.sh                 # storage, Foundry, registry, the image, the job
+deploy/recap/setup.sh --wire-server   # also sets ConnectionStrings__recaps and Recap__ApiKey on the web app
+```
+
+`--wire-server` restarts the site (as any app setting change does), so run it when no matches are
+on. Until the web app has both settings, and is running code with the recap endpoints, the job
+starts each night, finds nothing to do, and stops. It also does nothing when its own settings are
+missing.
+
+- **Run it now:** `az containerapp job start -g rg-netrts -n netrts-recap`. Publishing a day again
+  replaces that day's episode, and the job deletes the day's older files.
+- **Remove an episode:** delete its folder (`<date>/`) from the `recaps` container; it leaves the
+  site within 5 minutes.
+- **What the show says about the schedule** comes from the server's `Recap` settings:
+  `Recap__LeagueSchedule` ("League matches are played at 5 p.m. in GRSC 124."), `Recap__LeagueDays__0=Tuesday`
+  and so on to name the next league day, and `Recap__Mentoring` (TA mentoring in the Commons).
+- **Ladder snapshots.** At midnight (server time zone, `NetRts__TimeZone`, default `America/Denver`)
+  the server records every ladder for the day just ended; the show compares tonight's with last
+  night's, and the season ladder's top ten earn achievements there.
+- **CI** builds the job's image in the registry on every push to `main` and points the job at it
+  (`id-netrts-github` has Contributor on the registry and the job, granted by the template).
 
 ## Database migrations
 

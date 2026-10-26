@@ -95,6 +95,16 @@ export function playerLabel(p, { owner = true } = {}) {
   return html`${displayName(p?.name)}${verifiedBadge(p)}${owner && p?.verified && p.ownerName ? html`<span class="owner">${p.ownerName}</span>` : ''}`;
 }
 
+/**
+ * A bot linked to its page, and its verified owner linked to their profile. Not for use inside
+ * another link (a match row, say): use playerLabel there.
+ */
+export function botAndOwner(p, { id = p?.playerId, name = p?.name, owner = true } = {}) {
+  const bot = html`<a class="plain" href="#/bot/${id}">${displayName(name)}</a>${verifiedBadge(p)}`;
+  if (!owner || !p?.ownerName) return bot;
+  return html`${bot}${p.ownerSlug ? html`<a class="owner" href="#/player/${p.ownerSlug}">${p.ownerName}</a>` : html`<span class="owner">${p.ownerName}</span>`}`;
+}
+
 export function timeAgo(iso) {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return '';
@@ -106,6 +116,9 @@ export function timeAgo(iso) {
 }
 
 export const fmt = (n) => (typeof n === 'number' ? n.toLocaleString() : '–');
+
+/** Tooltip for the Skill column: OpenSkill's conservative estimate, round(40 × (μ − 3σ)), floored at 0. */
+export const SKILL_TITLE = 'Opponent-aware skill (OpenSkill): beating strong bots counts for more. A conservative estimate, 40 × (μ − 3σ): it starts at 0 and climbs as results come in.';
 
 const howWon = (reason) =>
   ({ Elimination: say('by elimination', 'by taking the last HQ'), TimeLimit: 'on score at the time limit', Surrender: 'by surrender' }[reason] || '');
@@ -126,4 +139,42 @@ export function outcomeHtml(outcome, players) {
   }
   return html`<strong class="pname outcome-winner" style="--pc:${slotVar(winner.slot)}">${displayName(winner.name)}</strong>
     won <strong class="outcome-how">${howWon(outcome.reason)}</strong> after ${fmt(outcome.ticks)} ticks`;
+}
+
+/**
+ * One row of a match list. Finished matches leave out the status column: they all say "Completed".
+ * clock: show when a finished match started as a time of day (for lists grouped by date) rather than how long ago.
+ */
+export function matchRow(m, { status = true, clock = false } = {}) {
+  const players = [...(m.players || [])].sort((a, b) => a.slot - b.slot);
+  // A league match lists who has joined (they're split into heats later), not a matchup.
+  const shown = m.heats ? players.slice(0, 12) : players;
+  const names = !players.length
+    ? html`<span class="muted">${say('no players yet', 'no badgers yet')}</span>`
+    : m.heats
+      ? html`${shown.map((p, i) => html`${i ? ', ' : ''}${playerLabel(p, { owner: false })}`)}${players.length > shown.length ? html` <span class="muted">+${players.length - shown.length} more</span>` : ''}`
+      : players.map((p, i) => html`${i ? html`<span class="vs-sep">vs</span>` : ''}<span class="pname" style="--pc:${slotVar(p.slot)}">${playerLabel(p, { owner: false })}</span>`);
+  const open = m.maxPlayers - players.length;
+  let meta;
+  if (m.heats) {
+    // A league match, played in heats.
+    meta = m.status === 'Waiting'
+      ? (m.heats.length ? html`${m.heats.length} heats · starting soon` : html`<b>${players.length}</b> joined · verified bots, join now`)
+      : html`${m.heats.filter((h) => h.status !== 'Completed').length} of ${m.heats.length} heats live`;
+  } else if (m.status === 'Completed' && m.outcome) {
+    meta = html`${outcomeHtml(m.outcome, m.players)}<br>${clock
+      ? new Date(m.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      : timeAgo(m.createdAt)}`;
+  } else if (m.status === 'Waiting') {
+    meta = html`${open} seat${open === 1 ? '' : 's'} open`;
+  } else {
+    const pct = m.maxTicks ? Math.min(100, (m.tick / m.maxTicks) * 100) : 0;
+    meta = html`tick ${fmt(m.tick)} / ${fmt(m.maxTicks)}<div class="minibar" aria-hidden="true"><span style="width:${pct.toFixed(1)}%"></span></div>`;
+  }
+  // A name keeps pointing at the newest match that uses it, so finished matches link by id.
+  const key = m.name && m.status !== 'Completed' ? m.name : m.matchId;
+  return html`<li><a class="match-row ${status ? '' : 'no-status'}" href="#/match/${key}" aria-label="${m.status} ${say('match', 'brawl')}: ${players.map((p) => displayName(p.name)).join(' versus ')}">
+    ${status ? html`<span class="status ${m.status}">${m.status === 'Active' ? 'Live' : m.status}</span>` : ''}
+    <span class="who">${m.category && m.category !== 'Practice' ? html`<span class="tag cat ${m.category}">${m.category}</span>` : ''}${m.name ? html`<b style="margin-right:8px">${m.name}</b>` : ''}${names}${m.heats ? '' : html`<span class="muted small" style="margin-left:8px">${m.mapWidth}×${m.mapHeight}</span>`}</span>
+    <span class="meta">${meta}</span></a></li>`;
 }

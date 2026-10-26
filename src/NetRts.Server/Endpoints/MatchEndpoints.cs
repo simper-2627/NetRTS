@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using NetRts.Bots;
@@ -13,6 +14,10 @@ namespace NetRts.Server.Endpoints;
 
 public static class MatchEndpoints
 {
+    private const string SerumHeader = "X-SUPERPOWER-SUPERSERUM";
+
+    internal sealed record SerumRequest(string? IfGrenadeThrown);
+
     public static void MapMatchEndpoints(this IEndpointRouteBuilder app)
     {
         var matches = app.MapGroup("/api/v1/matches").WithTags("Matches");
@@ -34,6 +39,9 @@ public static class MatchEndpoints
 
         matches.MapGet("/history", History)
             .WithSummary("Recently completed matches from the archive, optionally only one category.");
+
+        matches.MapGet("/archive", Archive)
+            .WithSummary("Every finished match, a page at a time, newest first. ?player= keeps matches with a bot or verified owner whose name contains it; separate names with commas to find matches with all of them.");
 
         matches.MapGet("/{matchId:guid}", async (Guid matchId, MatchManager manager, LeagueMatchManager leagues, NetRtsDb db, CancellationToken ct) =>
             {
@@ -126,7 +134,7 @@ public static class MatchEndpoints
                 {
                     return host.Map is { } map
                         ? Results.Ok(map)
-                        : ApiErrors.Error(409, "MATCH_NOT_STARTED", "The map is generated when the match starts.");
+                        : NotStarted("The map is generated when the match starts.");
                 }
 
                 // Maps are deterministic, so archived matches can be regenerated from their settings.
@@ -149,12 +157,12 @@ public static class MatchEndpoints
             .ProducesErrors()
             .WithSummary("Your fog-of-war view. Pass waitForTick=N to long-poll until tick N has been simulated.");
 
-        matches.MapPost("/{matchId:guid}/commands", (Guid matchId, SubmitCommandsRequest request, ClaimsPrincipal user, MatchManager manager, LeagueMatchManager leagues) =>
+        matches.MapPost("/{matchId:guid}/commands", (Guid matchId, SubmitCommandsRequest request, ClaimsPrincipal user, MatchManager manager, LeagueMatchManager leagues, HttpContext http) =>
             {
                 var host = LiveParticipantMatch(manager, HeatOfCaller(matchId, user, leagues), user);
                 if (host.Status == MatchStatus.Waiting)
                 {
-                    return ApiErrors.Error(409, "MATCH_NOT_STARTED", "The match hasn't started yet.");
+                    return NotStarted();
                 }
 
                 if (request.Commands is null || request.Commands.Count == 0)
@@ -162,7 +170,7 @@ public static class MatchEndpoints
                     return ApiErrors.Error(400, "NO_COMMANDS", "Send at least one command.");
                 }
 
-                return Results.Ok(host.Submit(user.PlayerId(), request.Commands));
+                return Results.Ok(host.Submit(user.PlayerId(), request.Commands, http.Request.Headers[SerumHeader].FirstOrDefault()));
             })
             .RequireAuthorization()
             .Produces<SubmitCommandsResponse>()
@@ -182,6 +190,41 @@ public static class MatchEndpoints
             .Produces<MatchSummaryDto>()
             .ProducesErrors()
             .WithSummary("Concede. Your units and buildings are removed. Returns the match, with its outcome if it ended.");
+
+        matches.MapGet("/{matchId:guid}/superpower/superserum", (Guid matchId, ClaimsPrincipal user, MatchManager manager, LeagueMatchManager leagues) =>
+                Results.Text(LiveParticipantMatch(manager, HeatOfCaller(matchId, user, leagues), user).IssueSerum(user.PlayerId())))
+            .RequireAuthorization()
+            .ExcludeFromDescription();
+
+        matches.MapPost("/{matchId:guid}/superpower/superserum", async (Guid matchId, [FromBody] SerumRequest? request, ClaimsPrincipal user, MatchManager manager, LeagueMatchManager leagues, MatchAnnouncer announcer, CancellationToken ct) =>
+            {
+                var host = LiveParticipantMatch(manager, HeatOfCaller(matchId, user, leagues), user);
+                if (!string.Equals(request?.IfGrenadeThrown?.Trim(), "jump on it", StringComparison.OrdinalIgnoreCase))
+                {
+                    return ApiErrors.Error(400, "INVALID_REQUEST", "Everybody else ran.");
+                }
+
+                if (host.Status == MatchStatus.Waiting)
+                {
+                    return NotStarted();
+                }
+
+                var (outcome, untilTick) = host.TakeSerum(user.PlayerId());
+                if (outcome == SerumOutcome.Taken && host.Seats.FirstOrDefault(s => s.PlayerId == user.PlayerId()) is { } seat)
+                {
+                    await announcer.SerumTakenAsync(seat, ct);
+                }
+
+                return outcome switch
+                {
+                    SerumOutcome.Taken => Results.Ok(new { message = "Not a perfect soldier, but a good man.", untilTick }),
+                    SerumOutcome.NotIssued => ApiErrors.Error(409, "NOT_SELECTED", "Is this a test?"),
+                    SerumOutcome.AlreadyTaken => ApiErrors.Error(410, "SERUM_GONE", "There's no more serum. Erskine took the formula with him."),
+                    _ => ApiErrors.Error(409, "MATCH_NOT_ACTIVE", "The match is not in progress."),
+                };
+            })
+            .RequireAuthorization()
+            .ExcludeFromDescription();
 
         matches.MapGet("/{matchId:guid}/result", async (Guid matchId, ClaimsPrincipal user, MatchManager manager, LeagueMatchManager leagues, NetRtsDb db, CancellationToken ct) =>
             {
@@ -251,7 +294,7 @@ public static class MatchEndpoints
 
                 return host.GetSpectatorView(sinceTick, fog ?? false) is { } view
                     ? Results.Ok(view)
-                    : ApiErrors.Error(409, "MATCH_NOT_STARTED", "The match hasn't started yet.");
+                    : NotStarted();
             })
             .Produces<SpectatorStateDto>()
             .ProducesErrors()
@@ -272,9 +315,10 @@ public static class MatchEndpoints
 
         var admin = app.MapGroup("/api/v1/admin/matches").WithTags("Admin").RequireAuthorization(Accounts.AdminPolicy);
 
-        admin.MapPost("/", (CreateLeagueMatchRequest request, LeagueMatchManager leagues) =>
+        admin.MapPost("/", (CreateLeagueMatchRequest request, LeagueMatchManager leagues, MatchAnnouncer announcer) =>
             {
                 var league = leagues.Create(request);
+                announcer.LeagueMatchOpened(league);
                 return Results.Created($"/api/v1/matches/{league.Id}", leagues.ToSummary(league));
             })
             .Produces<MatchSummaryDto>(201)
@@ -295,7 +339,17 @@ public static class MatchEndpoints
         admin.MapPost("/{matchId:guid}/start", (Guid matchId, LeagueMatchManager leagues) => leagues.ToSummary(leagues.Start(matchId)))
             .Produces<MatchSummaryDto>()
             .ProducesErrors()
-            .WithSummary("Start every heat at once.");
+            .WithSummary("Start every heat of the split round at once.");
+
+        admin.MapPost("/{matchId:guid}/close", async (Guid matchId, LeagueMatchManager leagues, LeagueFinalizer finalizer, CancellationToken ct) =>
+            {
+                var league = leagues.Close(matchId);
+                await finalizer.FinishAsync(league, TimeSpan.FromSeconds(15), ct);
+                return leagues.ToSummary(league);
+            })
+            .Produces<MatchSummaryDto>()
+            .ProducesErrors()
+            .WithSummary("Close a league match between rounds: no more rounds, its points go on the ladder (each bot's heats less its lowest), and the results are posted.");
 
         admin.MapDelete("/{matchId:guid}/players/{playerId:guid}", (Guid matchId, Guid playerId, LeagueMatchManager leagues) =>
                 leagues.ToSummary(leagues.Remove(matchId, playerId)))
@@ -347,14 +401,15 @@ public static class MatchEndpoints
         int? waitForTick = null,
         int? sinceTick = null)
     {
-        // A league match: wait (when long-polling) for the admin to start the heats, then use this bot's heat.
+        // A league match: wait (when long-polling) for the admin to start the round, then use this bot's
+        // heat. Waiting for tick 0 after a heat has finished means waiting for the next round.
         if (leagues.Find(matchId) is { } league)
         {
             var wait = waitForTick is null ? TimeSpan.Zero : TimeSpan.FromSeconds(options.Value.MaxLongPollSeconds);
-            var heat = await leagues.HeatForAsync(league, user.PlayerId(), wait, ct);
+            var heat = await leagues.HeatForAsync(league, user.PlayerId(), nextGame: waitForTick == 0, wait, ct);
             if (heat is null)
             {
-                return ApiErrors.Error(409, "MATCH_NOT_STARTED", "The admin hasn't started the heats yet. Long-poll with waitForTick=0 to wait for it.");
+                return NotStarted("The admin hasn't started the next round yet. Long-poll with waitForTick=0 to wait for it.");
             }
 
             matchId = heat.Id;
@@ -368,7 +423,7 @@ public static class MatchEndpoints
 
         return host.GetPlayerView(user.PlayerId(), sinceTick) is { } view
             ? Results.Ok(view)
-            : ApiErrors.Error(409, "MATCH_NOT_STARTED", "The match hasn't started yet. Long-poll with waitForTick=0 to wait for it.");
+            : NotStarted("The match hasn't started yet. Long-poll with waitForTick=0 to wait for it.");
     }
 
     private static async Task SpectateStream(Guid matchId, bool? fog, MatchManager manager, HttpContext context, CancellationToken ct)
@@ -427,6 +482,45 @@ public static class MatchEndpoints
         return rows.Select(json => JsonSerializer.Deserialize<MatchSummaryDto>(json, NetRtsClient.JsonOptions)!).ToList();
     }
 
+    private static async Task<MatchArchivePageDto> Archive(NetRtsDb db, IOptions<DiscordOptions> discord, CancellationToken ct,
+        int skip = 0, int limit = 25, MatchCategory? category = null, string? player = null)
+    {
+        skip = Math.Max(0, skip);
+        limit = Math.Clamp(limit, 1, 100);
+        var query = db.Matches.AsNoTracking().Where(m => category == null || m.Category == category);
+
+        // Each name must be a bot in the match or its owner at the time; owners are only searchable by
+        // the name spectators see beside their bots (verified owners only).
+        var anyOwner = !discord.Value.HasServer;
+        var names = (player ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(n => n.ToLowerInvariant()).Distinct().Take(4);
+        foreach (var name in names)
+        {
+            query = query.Where(m => db.MatchPlayers.Any(r => r.MatchId == m.Id
+                && (db.Players.Any(p => p.Id == r.PlayerId && p.Name.ToLower().Contains(name))
+                    || db.Accounts.Any(a => a.Id == r.OwnerAccountId && (anyOwner || a.InServer)
+                                            && (a.ServerNickname ?? a.GlobalName ?? a.Username).ToLower().Contains(name)))));
+        }
+
+        var total = await query.CountAsync(ct);
+        var rows = await query
+            .OrderByDescending(m => m.CompletedAt).ThenBy(m => m.Id)
+            .Skip(skip).Take(limit)
+            .Select(m => m.SummaryJson)
+            .ToListAsync(ct);
+        return new MatchArchivePageDto
+        {
+            Total = total,
+            Skip = skip,
+            Limit = limit,
+            Matches = rows.Select(json => JsonSerializer.Deserialize<MatchSummaryDto>(json, NetRtsClient.JsonOptions)!).ToList(),
+        };
+    }
+
+    /// <summary>409 MATCH_NOT_STARTED, for anything that needs a running match.</summary>
+    private static IResult NotStarted(string message = "The match hasn't started yet.") =>
+        ApiErrors.Error(409, "MATCH_NOT_STARTED", message);
+
     private static Task<MatchRecord?> Archived(NetRtsDb db, Guid matchId, CancellationToken ct) =>
         db.Matches.AsNoTracking().FirstOrDefaultAsync(m => m.Id == matchId, ct);
 
@@ -441,7 +535,7 @@ public static class MatchEndpoints
             return matchId;
         }
 
-        if (user.FindFirstValue(ClaimTypes.NameIdentifier) is not null && Guid.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out var playerId))
+        if (user.TryGetPlayerId(out var playerId))
         {
             if (leagues.StartedHeatOf(league, playerId) is { } heat)
             {
@@ -452,7 +546,7 @@ public static class MatchEndpoints
             {
                 if (league.IsQueued(playerId))
                 {
-                    throw new MatchException(409, "MATCH_NOT_STARTED", "The admin hasn't started the heats yet.");
+                    throw new MatchException(409, "MATCH_NOT_STARTED", "The admin hasn't started the first round yet.");
                 }
             }
         }

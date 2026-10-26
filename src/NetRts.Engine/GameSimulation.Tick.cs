@@ -62,14 +62,16 @@ public sealed partial class GameSimulation
             }
         }
 
-        var killers = new Dictionary<int, int>();
+        LandShells(attacks);
+
+        var killers = new Dictionary<int, Attack>();
         foreach (var attack in attacks)
         {
             var wasAlive = !attack.Target.Dead;
             attack.Target.Hp -= attack.Damage;
             if (wasAlive && attack.Target.Dead)
             {
-                killers[attack.Target.Id] = attack.AttackerOwner;
+                killers[attack.Target.Id] = attack;
             }
         }
 
@@ -83,9 +85,55 @@ public sealed partial class GameSimulation
             }
         }
 
+        foreach (var player in _players)
+        {
+            if (player.SerumUntilTick - GameRules.SerumTicks + 1 == Tick)
+            {
+                Announce(player, "SuperSoldiers", $"Super soldiers activated. {GameRules.SerumTicks} ticks.");
+            }
+
+            if (player.SerumUntilTick == Tick)
+            {
+                Announce(player, "SuperSoldiersEnded", "The serum wore off.");
+            }
+        }
+
         CheckForEnd(MatchEndReason.Elimination);
         _visibility = null;
         UpdateMemories();
+        UpdateStatistics();
+    }
+
+    /// <summary>Peaks and the score race, for <see cref="PlayerMatchStatsDto"/>.</summary>
+    private void UpdateStatistics()
+    {
+        var workers = new int[_players.Count];
+        foreach (var unit in _units)
+        {
+            if (unit.Type == UnitType.Worker)
+            {
+                workers[unit.Owner]++;
+            }
+        }
+
+        foreach (var player in _players.Where(p => !p.Eliminated))
+        {
+            player.PeakWorkers = Math.Max(player.PeakWorkers, workers[player.Slot]);
+            player.PeakResources = Math.Max(player.PeakResources, player.Resources);
+        }
+
+        if (Tick >= 100 && Tick % 10 == 0)
+        {
+            var totals = _players.Where(p => !p.Eliminated).Select(p => (Player: p, ScoreOf(p).Total)).ToList();
+            var leader = totals.Count > 0 ? totals.Max(t => t.Total) : 0;
+            if (leader > 0)
+            {
+                foreach (var (player, total) in totals)
+                {
+                    player.LowestScoreSharePercent = Math.Min(player.LowestScoreSharePercent, total * 100 / leader);
+                }
+            }
+        }
     }
 
     /// <summary>Each player remembers enemy buildings they've seen, and forgets them once they see the tile empty.</summary>
@@ -96,6 +144,11 @@ public sealed partial class GameSimulation
             var visibility = VisibilityFor(player.Slot);
             foreach (var b in _buildings.Where(b => b.Owner != player.Slot && IsVisible(visibility, b.Position)))
             {
+                if (b.Type == BuildingType.CommandCenter)
+                {
+                    player.EnemyCommandCenterSeenTick ??= Tick;
+                }
+
                 player.Remembered[b.Id] = new RememberedBuildingDto
                 {
                     Id = b.Id,
@@ -136,6 +189,12 @@ public sealed partial class GameSimulation
                     var unit = AddUnit(building.Owner, item.Type, spawn);
                     SendToRally(unit, building);
                     owner.UnitsProduced++;
+                    owner.UnitsTrained[item.Type] = owner.UnitsTrained.GetValueOrDefault(item.Type) + 1;
+                    if (item.Type != UnitType.Worker)
+                    {
+                        owner.FirstCombatUnitTick ??= Tick;
+                    }
+
                     AddEvent(owner, "UnitProduced", $"{item.Type} {unit.Id} ready at {spawn}", unit.Id, spectator: false);
                 }
             }
@@ -183,12 +242,18 @@ public sealed partial class GameSimulation
             return;
         }
 
+        if (unit.Type == UnitType.Worker)
+        {
+            unit.IdleTicks = unit.Order == OrderKind.Idle ? unit.IdleTicks + 1 : 0;
+            var owner = _players[unit.Owner];
+            owner.LongestWorkerIdleTicks = Math.Max(owner.LongestWorkerIdleTicks, unit.IdleTicks);
+        }
+
         switch (unit.Order)
         {
             case OrderKind.Idle:
                 unit.Activity = UnitActivity.Idle;
-                if (unit.Type != UnitType.Worker
-                    && FindEnemy(unit.Owner, unit.Position, unit.Stats.Range, unitsOnly: false) is { } nearby)
+                if (unit.Type != UnitType.Worker && FindTarget(unit) is { } nearby)
                 {
                     unit.Activity = UnitActivity.Attacking;
                     TryAttack(unit, nearby, attacks);
@@ -252,8 +317,13 @@ public sealed partial class GameSimulation
         unit.Activity = UnitActivity.Attacking;
         if (unit.Position.Chebyshev(target.Position) <= unit.Stats.Range)
         {
+            // Inside the minimum range a siege unit holds its fire; the target has to back off (or be dealt with by others).
             unit.ClearPath();
-            TryAttack(unit, target, attacks);
+            if (unit.Position.Chebyshev(target.Position) >= unit.Stats.MinRange)
+            {
+                TryAttack(unit, target, attacks);
+            }
+
             return;
         }
 
@@ -270,9 +340,58 @@ public sealed partial class GameSimulation
             return;
         }
 
-        attacks.Add(new Attack(unit, unit.Owner, target, DamageAgainst(unit, target)));
+        if (unit.Stats.ShotTicks > 0)
+        {
+            _shells.Add(new Shell(unit, unit.Position, target.Position, Tick, Tick + unit.Stats.ShotTicks));
+        }
+        else
+        {
+            attacks.Add(new Attack(unit, unit.Owner, target, DamageAgainst(unit, target)));
+        }
+
         unit.Cooldown = unit.Stats.AttackCooldown;
     }
+
+    /// <summary>Shells due this tick hit every enemy of their owner on the tile they land on; whoever moved away is missed.</summary>
+    private void LandShells(List<Attack> attacks)
+    {
+        foreach (var shell in _shells.Where(s => s.LandsTick <= Tick).ToList())
+        {
+            _shells.Remove(shell);
+            var owner = shell.Attacker.Owner;
+            foreach (var unit in _units.Where(u => u.Owner != owner && !u.Dead && u.Position == shell.Target))
+            {
+                attacks.Add(new Attack(shell.Attacker, owner, unit, DamageAgainst(shell.Attacker, unit)));
+            }
+
+            if (_buildingAt[Index(shell.Target)] is var id and not 0 && _entities[id] is BuildingEntity { Dead: false } building && building.Owner != owner)
+            {
+                attacks.Add(new Attack(shell.Attacker, owner, building, DamageAgainst(shell.Attacker, building)));
+            }
+        }
+    }
+
+    /// <summary>
+    /// What an idle combat unit fires at: the closest visible enemy it can hit from where it stands.
+    /// Siege units, whose shells land late, pick targets that are standing still first.
+    /// </summary>
+    private Entity? FindTarget(UnitEntity unit)
+    {
+        var visibility = VisibilityFor(unit.Owner);
+        bool InReach(Entity e) => InStrikeZone(unit, e.Position) && IsVisible(visibility, e.Position);
+        if (unit.Stats.ShotTicks > 0
+            && ClosestEnemy(unit.Owner, unit.Position, e => InReach(e) && !IsMoving(e), unitsOnly: false) is { } still)
+        {
+            return still;
+        }
+
+        return ClosestEnemy(unit.Owner, unit.Position, InReach, unitsOnly: false);
+    }
+
+    private static bool InStrikeZone(UnitEntity unit, Point target) =>
+        unit.Position.Chebyshev(target) is var d && d <= unit.Stats.Range && d >= unit.Stats.MinRange;
+
+    private static bool IsMoving(Entity e) => e is UnitEntity { Path.Count: > 0 };
 
     private int DamageAgainst(Entity attacker, Entity target)
     {
@@ -298,11 +417,13 @@ public sealed partial class GameSimulation
         return ClosestEnemy(owner, from, e => from.Chebyshev(e.Position) <= range && IsVisible(visibility, e.Position), unitsOnly);
     }
 
-    /// <summary>Closest enemy inside this unit's own sight radius (used by attack-move).</summary>
+    /// <summary>Closest enemy inside this unit's own sight radius and outside its minimum range (used by attack-move).</summary>
     private Entity? FindEnemyInSight(UnitEntity unit)
     {
         var r2 = unit.Stats.Vision * unit.Stats.Vision;
-        return ClosestEnemy(unit.Owner, unit.Position, e => unit.Position.DistanceSquared(e.Position) <= r2, unitsOnly: false);
+        return ClosestEnemy(unit.Owner, unit.Position,
+            e => unit.Position.DistanceSquared(e.Position) <= r2 && unit.Position.Chebyshev(e.Position) >= unit.Stats.MinRange,
+            unitsOnly: false);
     }
 
     /// <summary>
@@ -422,6 +543,7 @@ public sealed partial class GameSimulation
                 _deposits.Remove(deposit);
                 _entities.Remove(deposit.Id);
                 _depositAt[Index(deposit.Position)] = 0;
+                player.DepositsExhausted++;
                 AddEvent(player, "DepositDepleted", $"Deposit {deposit.Id} at {deposit.Position} is exhausted", deposit.Id);
             }
 
@@ -453,6 +575,7 @@ public sealed partial class GameSimulation
         {
             unit.ClearPath();
             var banked = Math.Min(unit.Carrying, Math.Max(0, StorageCapacity(unit.Owner) - player.Resources));
+            player.OreWasted += unit.Carrying - banked;
             player.Resources += banked;
             player.Gathered += banked;
             player.IncomeWindow[Tick % player.IncomeWindow.Length] += banked;
@@ -496,6 +619,12 @@ public sealed partial class GameSimulation
                 unit.Activity = UnitActivity.Building;
                 if (building.AddWork(1))
                 {
+                    player.BuildingsCompleted[building.Type] = player.BuildingsCompleted.GetValueOrDefault(building.Type) + 1;
+                    if (building.Type == BuildingType.Barracks)
+                    {
+                        player.FirstBarracksTick ??= Tick;
+                    }
+
                     AddEvent(player, "BuildingCompleted", $"{building.Type} {building.Id} completed at {site}", building.Id);
                 }
 
@@ -546,7 +675,7 @@ public sealed partial class GameSimulation
         AddEvent(player, "BuildingStarted", $"{type} {placed.Id} started at {site}", placed.Id);
     }
 
-    private void RemoveDead(Dictionary<int, int> killers)
+    private void RemoveDead(Dictionary<int, Attack> killers)
     {
         foreach (var unit in _units.Where(u => u.Dead).ToList())
         {
@@ -555,10 +684,19 @@ public sealed partial class GameSimulation
             var owner = _players[unit.Owner];
             owner.UnitsLost++;
             AddEvent(owner, "UnitLost", $"{unit.Type} {unit.Id} was destroyed at {unit.Position}", unit.Id, spectator: false);
-            if (killers.TryGetValue(unit.Id, out var killerSlot))
+            if (killers.TryGetValue(unit.Id, out var kill))
             {
-                var killer = _players[killerSlot];
+                var killer = _players[kill.AttackerOwner];
                 killer.UnitsKilled++;
+                if (kill.Attacker is BuildingEntity)
+                {
+                    killer.TowerKills++;
+                }
+                else if (kill.Attacker is UnitEntity attacker && Factor(attacker) > 1)
+                {
+                    killer.SerumKills++;
+                }
+
                 killer.Destruction += unit.Stats.Cost;
                 AddEvent(killer, "UnitKilled", $"Killed enemy {unit.Type} {unit.Id}", unit.Id);
             }
@@ -572,10 +710,15 @@ public sealed partial class GameSimulation
             var owner = _players[building.Owner];
             owner.BuildingsLost++;
             AddEvent(owner, "BuildingLost", $"{building.Type} {building.Id} was destroyed at {building.Position}", building.Id, spectator: false);
-            if (killers.TryGetValue(building.Id, out var killerSlot))
+            if (killers.TryGetValue(building.Id, out var kill))
             {
-                var killer = _players[killerSlot];
+                var killer = _players[kill.AttackerOwner];
                 killer.BuildingsDestroyed++;
+                if (building.Type == BuildingType.CommandCenter)
+                {
+                    killer.CommandCentersDestroyed++;
+                }
+
                 killer.Destruction += building.Stats.Cost;
                 AddEvent(killer, "BuildingDestroyed", $"Destroyed enemy {building.Type} {building.Id}", building.Id);
             }
@@ -586,6 +729,7 @@ public sealed partial class GameSimulation
     {
         player.Eliminated = true;
         player.CommandQueue.Clear();
+        _shells.RemoveAll(s => s.Attacker.Owner == player.Slot);
         foreach (var unit in _units.Where(u => u.Owner == player.Slot).ToList())
         {
             _units.Remove(unit);

@@ -37,6 +37,29 @@ internal sealed class PlayerState(Guid id, int slot, string name)
     public int BuildingsLost { get; set; }
     public int BuildingsDestroyed { get; set; }
 
+    /// <summary>-1 until taken; then the last tick it lasts.</summary>
+    public int SerumUntilTick { get; set; } = -1;
+
+    // Match statistics, reported in PlayerResultDto.Stats. They never affect play.
+    public SortedDictionary<UnitType, int> UnitsTrained { get; } = [];
+    public SortedDictionary<BuildingType, int> BuildingsCompleted { get; } = [];
+    public SortedSet<int> RalliedBuildings { get; } = [];
+    public int? FirstBarracksTick { get; set; }
+    public int? FirstCombatUnitTick { get; set; }
+    public int? EnemyCommandCenterSeenTick { get; set; }
+    public int DepositsExhausted { get; set; }
+    public int CommandCentersDestroyed { get; set; }
+    public int PeakWorkers { get; set; }
+    public int PeakResources { get; set; } = GameRules.StartingResources;
+    public int OreWasted { get; set; }
+    public int TowerKills { get; set; }
+    public int SerumKills { get; set; }
+    public int CommandsQueued { get; set; }
+    public int CommandsRejected { get; set; }
+    public int CommandsFailed { get; set; }
+    public int LongestWorkerIdleTicks { get; set; }
+    public int LowestScoreSharePercent { get; set; } = 100;
+
     public int Tier(UpgradeType tier1, UpgradeType tier2) =>
         (Upgrades.Contains(tier1) ? 1 : 0) + (Upgrades.Contains(tier2) ? 1 : 0);
 
@@ -46,7 +69,14 @@ internal sealed class PlayerState(Guid id, int slot, string name)
     public int HarvestingBonus => Tier(UpgradeType.Harvesting1, UpgradeType.Harvesting2) * GameRules.HarvestingBonusPerTier;
 }
 
-internal sealed record QueuedCommand(long Id, CommandRequest Request);
+/// <summary>A command waiting in a player's queue.</summary>
+/// <param name="Id">The id the bot was given, for failure events.</param>
+/// <param name="Request">The command as submitted.</param>
+/// <param name="Recorded">Its entry in the replay, dropped from it again if the queue is cleared.</param>
+internal sealed record QueuedCommand(long Id, CommandRequest Request, ReplayCommandDto Recorded)
+{
+    public bool Boosted => Recorded.Boosted;
+}
 
 internal abstract class Entity(int id, int owner, Point position)
 {
@@ -92,6 +122,9 @@ internal sealed class UnitEntity : Entity
     public int MovePoints { get; set; }
     public int SerumUntilTick { get; set; } = -1;
 
+    /// <summary>Ticks in a row this unit has been idle (statistics only).</summary>
+    public int IdleTicks { get; set; }
+
     public List<Point> Path { get; set; } = [];
     public Point? PathGoal { get; set; }
     public int PathRange { get; set; }
@@ -104,7 +137,10 @@ internal sealed class UnitEntity : Entity
         TargetId = null;
         BuildType = null;
         OrderCommandId = null;
-        ClearPath();
+
+        // Keep MovePoints: a unit re-ordered every tick would otherwise never bank a whole tile.
+        Path = [];
+        PathGoal = null;
     }
 
     public void ClearPath()
@@ -165,6 +201,9 @@ internal sealed class BuildingEntity : Entity
     // Sites start at 10% health and gain the rest as they are built; damage taken is kept.
     private int HpForWork(int work) => Stats.MaxHp / 10 + Stats.MaxHp * 9 / 10 * work / Stats.BuildWork;
 }
+
+/// <summary>A siege shot in flight: it lands on <see cref="Target"/> at the end of <see cref="LandsTick"/>.</summary>
+internal sealed record Shell(UnitEntity Attacker, Point From, Point Target, int FiredTick, int LandsTick);
 
 internal sealed class ProductionItem(UnitType type)
 {

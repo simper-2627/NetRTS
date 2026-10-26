@@ -1,11 +1,16 @@
 // Spectator UI: hash router + home view.
-import { api, html, raw, setHtml, slotVar, displayName, playerLabel, verifiedBadge, timeAgo, fmt, outcomeHtml, esc } from './_content/NetRts.Web.Rendering/util.js';
-import { GAME, SNOW, say, nickname } from './_content/NetRts.Web.Rendering/lore.js';
+import { api, html, raw, setHtml, botAndOwner, verifiedBadge, fmt, esc, matchRow, SKILL_TITLE } from './util.js';
+import { GAME, SNOW, say, nickname } from './lore.js';
 import { mountSpectate } from './spectate.js';
 import { mountAccount } from './account.js';
 import { mountLeague } from './league.js';
+import { mountRecaps, showLatestRecap } from './recaps.js';
+import { mountAchievements, mountBot } from './achievements.js';
+import { mountTrophyRoom, mountPerson } from './people.js';
+import { mountHistory } from './history.js';
 
 const main = document.getElementById('main');
+const SKILL_TH = html`<th scope="col"><abbr title="${SKILL_TITLE}">Skill</abbr></th>`;
 let teardown = null;
 
 function route() {
@@ -15,7 +20,13 @@ function route() {
   // A match id, or the name a bot gave its match.
   const m = hash.match(/^#\/match\/([0-9a-fA-F-]{36}|[A-Za-z0-9_-]{3,32})\/?$/);
   const account = /^#\/account(\/|\?|$)/.test(hash);
-  const section = m ? 'match' : account ? 'account' : 'home';
+  const recaps = hash.match(/^#\/recaps(?:\/([0-9a-fA-F-]{36}))?\/?$/);
+  const achievements = /^#\/achievements\/?$/.test(hash);
+  const bot = hash.match(/^#\/bot\/([0-9a-fA-F-]{36})\/?$/);
+  const trophyRoom = /^#\/trophy-room\/?$/.test(hash);
+  const person = hash.match(/^#\/player\/([A-Za-z0-9-]{1,48})\/?$/);
+  const history = hash.match(/^#\/history\/?(?:\?(.*))?$/);
+  const section = m ? 'match' : account ? 'account' : recaps ? 'recaps' : achievements || bot || trophyRoom || person ? 'achievements' : 'home';
   document.querySelectorAll('.topbar nav a[data-section]').forEach((a) => {
     if (a.dataset.section === section) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
@@ -25,6 +36,18 @@ function route() {
     teardown = mountMatch(main, m[1]);
   } else if (account) {
     teardown = mountAccount(main, showAccountLink);
+  } else if (recaps) {
+    teardown = mountRecaps(main, recaps[1]);
+  } else if (achievements) {
+    teardown = mountAchievements(main);
+  } else if (bot) {
+    teardown = mountBot(main, bot[1]);
+  } else if (trophyRoom) {
+    teardown = mountTrophyRoom(main);
+  } else if (person) {
+    teardown = mountPerson(main, person[1]);
+  } else if (history) {
+    teardown = mountHistory(main, new URLSearchParams(history[1] ?? ''));
   } else {
     teardown = mountHome(main);
   }
@@ -66,7 +89,7 @@ api('/api/v1/account').then(showAccountLink).catch(() => {});
 const CATEGORIES = [
   { key: 'Practice', label: say('Practice', 'Scrimmage'), note: 'Every match bots start themselves. Open to everyone.' },
   { key: 'Preseason', label: say('Preseason', 'Preseason'), note: 'Warm-up league matches (beta testing). Ranked by points; they don\'t count toward the season.' },
-  { key: 'Season', label: say('Season', 'Season'), note: 'Regular-season matches run by the admins in heats; Discord-verified bots only. Ranked by points: each heat\'s top four score their margins over the players below them.' },
+  { key: 'Season', label: say('Season', 'Season'), note: 'Regular-season matches run by the admins in heats; Discord-verified bots only. Ranked by points: each heat\'s top four score their margins over the players below them; a bot that plays two or more heats of one match drops its lowest. Skill weighs who you beat.' },
   { key: 'Championship', label: say('Championship', 'Championship'), note: 'Championship matches; Discord-verified bots only. Ranked by points, like the season.' },
 ];
 
@@ -121,6 +144,7 @@ function mountHome(root) {
 
     <div class="board">
       <div>
+        <section aria-labelledby="recap-h" id="recap-card" hidden></section>
         <section aria-labelledby="live-h">
           <div class="section-head">
             <h2 id="live-h">${say('Live matches', 'Live brawls')}</h2>
@@ -131,6 +155,7 @@ function mountHome(root) {
         <section aria-labelledby="hist-h">
           <h2 id="hist-h">${say('Recent results', 'Recent brawls')}</h2>
           <div id="history"><p class="empty">Loading results…</p></div>
+          <p class="small more-link"><a href="#/history">${say('All past matches', 'All past brawls')}</a> <span class="muted">· search by ${say('bot', 'badger')} or player, and watch any replay</span></p>
         </section>
       </div>
       <div>
@@ -348,13 +373,17 @@ Authorization: Bearer &lt;apiKey&gt;
       if (!alive || category !== root.querySelector('input[name="ladder-cat"]:checked')?.value) return;
       setHtml(el, list.length ? html`
         <div class="table-scroll"><table class="ladder">
-          <caption class="visually-hidden">${say('Players ranked by rating', 'Badgers ranked by rating')}</caption>
-          <thead><tr><th scope="col">#</th><th scope="col">Player</th>${category !== 'Practice' ? html`<th scope="col"><abbr title="League points: score margins over the rest of each match's top four">Pts</abbr></th>` : ''}<th scope="col">Rating</th>
+          <caption class="visually-hidden">${category === 'Practice' ? say('Players ranked by rating', 'Badgers ranked by rating') : say('Players ranked by points', 'Badgers ranked by points')}</caption>
+          <thead><tr><th scope="col">#</th><th scope="col">Player</th>${category !== 'Practice'
+            ? html`<th scope="col"><abbr title="League points: score margins over the rest of each match's top four (a bot's lowest heat of a night with two or more is dropped)">Pts</abbr></th>${SKILL_TH}<th scope="col">Rating</th>`
+            : html`<th scope="col">Rating</th>${SKILL_TH}`}
             <th scope="col"><abbr title="Wins">W</abbr></th><th scope="col"><abbr title="Losses">L</abbr></th><th scope="col"><abbr title="Draws">D</abbr></th></tr></thead>
           <tbody>${list.map((p) => html`
             <tr><td>${p.rank}</td>
-              <td>${playerLabel(p)}${p.isHouseBot ? html`<span class="tag">house</span>` : ''}</td>
-              ${category !== 'Practice' ? html`<td class="rating">${fmt(p.points)}</td>` : ''}<td class="${category === 'Practice' ? 'rating' : ''}">${Math.round(p.rating)}</td><td>${p.wins}</td><td>${p.losses}</td><td>${p.draws}</td></tr>`)}
+              <td>${botAndOwner(p)}${p.isHouseBot ? html`<span class="tag">house</span>` : ''}</td>
+              ${category !== 'Practice'
+                ? html`<td class="rating">${fmt(p.points)}</td><td>${fmt(p.skill)}</td><td>${Math.round(p.rating)}</td>`
+                : html`<td class="rating">${Math.round(p.rating)}</td><td>${fmt(p.skill)}</td>`}<td>${p.wins}</td><td>${p.losses}</td><td>${p.draws}</td></tr>`)}
           </tbody>
         </table></div>` : category === 'Practice'
         ? html`<p class="empty">${say('No ranked players yet.', 'No ranked badgers yet.')}</p>`
@@ -367,42 +396,10 @@ Authorization: Bearer &lt;apiKey&gt;
     }
   }
 
+  const stopRecap = showLatestRecap($('recap-card'));
   refresh();
 
-  return () => { alive = false; clearTimeout(timer); };
-}
-
-/** One row of a match list. Finished matches leave out the status column: they all say "Completed". */
-function matchRow(m, { status = true } = {}) {
-  const players = [...(m.players || [])].sort((a, b) => a.slot - b.slot);
-  // A league match lists who has joined (they're split into heats later), not a matchup.
-  const shown = m.heats ? players.slice(0, 12) : players;
-  const names = !players.length
-    ? html`<span class="muted">${say('no players yet', 'no badgers yet')}</span>`
-    : m.heats
-      ? html`${shown.map((p, i) => html`${i ? ', ' : ''}${playerLabel(p, { owner: false })}`)}${players.length > shown.length ? html` <span class="muted">+${players.length - shown.length} more</span>` : ''}`
-      : players.map((p, i) => html`${i ? html`<span class="vs-sep">vs</span>` : ''}<span class="pname" style="--pc:${slotVar(p.slot)}">${playerLabel(p, { owner: false })}</span>`);
-  const open = m.maxPlayers - players.length;
-  let meta;
-  if (m.heats) {
-    // A league match, played in heats.
-    meta = m.status === 'Waiting'
-      ? (m.heats.length ? html`${m.heats.length} heats · starting soon` : html`<b>${players.length}</b> joined · verified bots, join now`)
-      : html`${m.heats.filter((h) => h.status !== 'Completed').length} of ${m.heats.length} heats live`;
-  } else if (m.status === 'Completed' && m.outcome) {
-    meta = html`${outcomeHtml(m.outcome, m.players)}<br>${timeAgo(m.createdAt)}`;
-  } else if (m.status === 'Waiting') {
-    meta = html`${open} seat${open === 1 ? '' : 's'} open`;
-  } else {
-    const pct = m.maxTicks ? Math.min(100, (m.tick / m.maxTicks) * 100) : 0;
-    meta = html`tick ${fmt(m.tick)} / ${fmt(m.maxTicks)}<div class="minibar" aria-hidden="true"><span style="width:${pct.toFixed(1)}%"></span></div>`;
-  }
-  // A name keeps pointing at the newest match that uses it, so finished matches link by id.
-  const key = m.name && m.status !== 'Completed' ? m.name : m.matchId;
-  return html`<li><a class="match-row ${status ? '' : 'no-status'}" href="#/match/${key}" aria-label="${m.status} ${say('match', 'brawl')}: ${players.map((p) => displayName(p.name)).join(' versus ')}">
-    ${status ? html`<span class="status ${m.status}">${m.status === 'Active' ? 'Live' : m.status}</span>` : ''}
-    <span class="who">${m.category && m.category !== 'Practice' ? html`<span class="tag cat ${m.category}">${m.category}</span>` : ''}${m.name ? html`<b style="margin-right:8px">${m.name}</b>` : ''}${names}${m.heats ? '' : html`<span class="muted small" style="margin-left:8px">${m.mapWidth}×${m.mapHeight}</span>`}</span>
-    <span class="meta">${meta}</span></a></li>`;
+  return () => { alive = false; clearTimeout(timer); stopRecap(); };
 }
 
 route();

@@ -169,6 +169,11 @@ public sealed partial class GameSimulation
             }
         }
 
+        if (stats.RequiresUpgrade is { } upgrade && !player.Upgrades.Contains(upgrade))
+        {
+            return Error("MISSING_PREREQUISITE", $"{type} requires the {upgrade} upgrade.");
+        }
+
         if (player.Resources < stats.Cost)
         {
             return Error("INSUFFICIENT_RESOURCES", $"{type} costs {stats.Cost}; you have {player.Resources}.");
@@ -451,6 +456,7 @@ public sealed partial class GameSimulation
                 foreach (var unit in command!.Units)
                 {
                     unit.OrderCommandId = queued.Id;
+                    unit.SerumUntilTick = queued.Boosted ? player.SerumUntilTick : -1;
                 }
             }
         }
@@ -534,12 +540,14 @@ public sealed partial class GameSimulation
                 if (command.Position is { } produceRally)
                 {
                     command.Building!.Rally = produceRally;
+                    player.RalliedBuildings.Add(command.Building.Id);
                 }
 
                 break;
 
             case CommandType.Rally:
                 command.Building!.Rally = command.Position;
+                player.RalliedBuildings.Add(command.Building.Id);
                 break;
 
             case CommandType.Research:

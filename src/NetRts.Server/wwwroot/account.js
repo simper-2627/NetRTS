@@ -1,6 +1,7 @@
 // Account page: Discord sign-in, the bots you own, and (for Discord server admins) league matches.
-import { api, html, setHtml, playerLabel, verifiedBadge, fmt } from './_content/NetRts.Web.Rendering/util.js';
-import { GAME, say } from './_content/NetRts.Web.Rendering/lore.js';
+import { api, html, setHtml, playerLabel, verifiedBadge, fmt } from './util.js';
+import { GAME, say } from './lore.js';
+import { earnedHtml } from './achievements.js';
 
 const CATEGORIES = ['Practice', 'Preseason', 'Season', 'Championship'];
 const SIGN_IN = '/auth/discord?returnUrl=' + encodeURIComponent('/#/account');
@@ -51,7 +52,7 @@ export function mountAccount(root, onAccount) {
         ${a.avatarUrl ? html`<img class="avatar big" src="${a.avatarUrl}" alt="" width="56" height="56">` : ''}
         <div>
           <h1 class="headline">${a.displayName}${verifiedBadge({ verified: a.verified, ownerName: a.displayName })}</h1>
-          <p class="muted" style="margin:4px 0 0">@${a.username}${a.isAdmin ? html`<span class="tag">admin</span>` : ''}</p>
+          <p class="muted" style="margin:4px 0 0">@${a.username}${a.isAdmin ? html`<span class="tag">admin</span>` : ''}${a.profileSlug ? html` · <a href="#/player/${a.profileSlug}">Your public profile</a>` : ''}</p>
         </div>
         <button type="button" class="btn ghost" id="sign-out">Sign out</button>
       </div>
@@ -68,10 +69,10 @@ export function mountAccount(root, onAccount) {
           <div class="table-scroll"><table class="ladder bots">
             <thead><tr><th scope="col">Bot</th>${CATEGORIES.map((c) => html`<th scope="col">${c}</th>`)}<th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
             <tbody>${info.bots.map((b) => html`
-              <tr><td>${playerLabel(b, { owner: false })}</td>
+              <tr><td><a class="plain" href="#/bot/${b.playerId}">${playerLabel(b, { owner: false })}</a></td>
                 ${CATEGORIES.map((c) => {
-                  const r = b.records.find((x) => x.category === c) || { rating: 1200, wins: 0, losses: 0, draws: 0 };
-                  return html`<td><span class="rating">${fmt(r.rating)}</span><br><span class="muted small">${r.wins}-${r.losses}-${r.draws}</span></td>`;
+                  const r = b.records.find((x) => x.category === c) || { rating: 1200, wins: 0, losses: 0, draws: 0, skill: 0 };
+                  return html`<td><span class="rating">${fmt(r.rating)}</span><br><span class="muted small">${r.wins}-${r.losses}-${r.draws} · skill ${fmt(r.skill)}</span></td>`;
                 })}
                 <td class="actions">
                   <button type="button" class="btn ghost small-btn" data-key="${b.playerId}" data-name="${b.name}">New key</button>
@@ -80,6 +81,12 @@ export function mountAccount(root, onAccount) {
             </tbody></table></div>`
           : html`<p class="empty">No bots yet. Register one, or claim one you made before.</p>`}
       </section>
+
+      ${info.bots.length ? html`<section aria-labelledby="ach-h">
+        <div class="section-head"><h2 id="ach-h">Achievements</h2><a class="small" href="#/achievements">All achievements</a></div>
+        <p class="muted small">Everything your ${say('bots', 'badgers')} have earned, each once, with the ${say('bots', 'badgers')} that earned it.</p>
+        ${earnedHtml(info.achievements || [], { bots: true })}
+      </section>` : ''}
 
       <div class="account-forms">
         <form id="claim" class="panel-form" novalidate>

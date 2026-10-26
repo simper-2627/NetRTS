@@ -4,9 +4,11 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using NetRts.Protocol;
 using NetRts.Server.Auth;
+using NetRts.Server.Data;
 
 namespace NetRts.Server.Matches;
 
@@ -38,7 +40,8 @@ public sealed class DiscordWebhook(HttpClient http, IOptions<DiscordOptions> opt
 /// Announces finished matches in the coding-competition Discord channel, when a results webhook is
 /// configured (the shared server; private servers leave it unset):
 /// <list type="bullet">
-/// <item>league matches: one message once every heat has finished, with each heat's top players and points;</item>
+/// <item>league matches: one message once every heat of a round has finished, with each heat's top players and points, and
+/// one when the match is closed, with each bot's total and the ladder;</item>
 /// <item>practice between real bots: one short message each;</item>
 /// <item>practice against house bots only: an hourly digest, so iterating on a bot doesn't flood the channel;</item>
 /// <item>house-bot exhibitions: nothing.</item>
@@ -52,13 +55,13 @@ public sealed class MatchAnnouncer(
     TimeProvider time,
     ILogger<MatchAnnouncer> logger) : BackgroundService
 {
-    /// <summary>Discord allows about 30 webhook messages a minute; stay under it.</summary>
-    private static readonly TimeSpan MinimumGap = TimeSpan.FromSeconds(2.1);
-
     private readonly Channel<JsonObject> _outbox = Channel.CreateBounded<JsonObject>(new BoundedChannelOptions(200) { FullMode = BoundedChannelFullMode.DropOldest });
     private readonly List<MatchSummaryDto> _digest = [];
-    private readonly HashSet<Guid> _announcedLeagues = [];
+    private readonly HashSet<(Guid League, int Round)> _announcedRounds = [];
+    private const string SerumMilestone = "serum";
+
     private readonly object _gate = new();
+    private readonly SemaphoreSlim _milestoneGate = new(1, 1);
 
     public bool Enabled => !string.IsNullOrWhiteSpace(discord.Value.ResultsWebhookUrl);
 
@@ -72,7 +75,7 @@ public sealed class MatchAnnouncer(
 
         if (host.ParentMatchId is { } parent)
         {
-            AnnounceLeagueIfDone(parent);
+            AnnounceRoundIfDone(parent, host.Id);
         }
         else if (summary.Players.Count(p => !p.IsHouseBot) >= 2)
         {
@@ -123,7 +126,7 @@ public sealed class MatchAnnouncer(
                 logger.LogWarning(ex, "Could not post a match result to Discord");
             }
 
-            await Task.Delay(MinimumGap, time, stoppingToken);
+            await Task.Delay(TimeSpan.FromMilliseconds(discord.Value.MessageGapMs), time, stoppingToken);
         }
     }
 
@@ -142,18 +145,166 @@ public sealed class MatchAnnouncer(
         }
     }
 
-    private void Post(JsonObject embed)
+    /// <summary>
+    /// The first person to take the serum unlocks super soldiers for everyone to hear about; the next
+    /// three are mentioned too. Each Discord account counts once.
+    /// </summary>
+    public async Task SerumTakenAsync(Seat seat, CancellationToken ct)
     {
-        var message = new JsonObject
+        if (!Enabled || !seat.Verified || seat.OwnerAccountId is not { } accountId)
         {
-            ["embeds"] = new JsonArray(embed),
-            // Names are shown as text; never ping anyone.
-            ["allowed_mentions"] = new JsonObject { ["parse"] = new JsonArray() },
-        };
+            return;
+        }
+
+        await _milestoneGate.WaitAsync(ct);
+        try
+        {
+            await using var scope = services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<NetRtsDb>();
+            if (await db.AccountMilestones.AnyAsync(m => m.AccountId == accountId && m.Kind == SerumMilestone, ct))
+            {
+                return;
+            }
+
+            var before = await db.AccountMilestones.CountAsync(m => m.Kind == SerumMilestone, ct);
+            if (before >= 4)
+            {
+                return;
+            }
+
+            db.AccountMilestones.Add(new AccountMilestoneRecord { AccountId = accountId, Kind = SerumMilestone, ReachedAt = time.GetUtcNow().UtcDateTime });
+            await db.SaveChangesAsync(ct);
+            var who = $"**{Escape(seat.OwnerName ?? seat.Name)}**";
+            Send(new JsonObject { ["content"] = before == 0 ? $"{who} unlocked super soldiers!" : $"{who} has super soldiers now too!" });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Could not record a milestone");
+        }
+        finally
+        {
+            _milestoneGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// A league match is closed and its points are on the ladder: each bot's total for the match (its
+    /// heats less its lowest) and the ladder's top as it now stands. <paramref name="name"/> is null for
+    /// a match nobody closed, finalized after a restart.
+    /// </summary>
+    public void LeagueMatchFinal(string? name, Guid? leagueId, MatchCategory category,
+        IReadOnlyList<LeagueMatchTotal> totals, IReadOnlyList<LeaderboardEntryDto> ladder)
+    {
+        if (!Enabled)
+        {
+            return;
+        }
+
+        var rows = totals.Take(15).Select((t, i) =>
+        {
+            var heats = t.HeatPoints.Count < 2 ? "" : $" ({string.Join(" + ", t.HeatPoints.Select(p => p.ToString("N0", CultureInfo.InvariantCulture)))}, lowest dropped)";
+            return $"{i + 1}. {Who(t.Name, false, t.Verified, t.OwnerName)} · **{t.Points.ToString("N0", CultureInfo.InvariantCulture)} pts**{heats}";
+        }).ToList();
+        if (totals.Count > 15)
+        {
+            rows.Add($"…and {totals.Count - 15} more");
+        }
+
+        var embed = Embed(name is null ? $"{category}: a match is final" : $"{category}: {name} is final",
+            leagueId is { } id ? Link($"#/match/{id}") : Link("#/leaderboard"),
+            Truncate(string.Join("\n", rows), 4000), category, null);
+        embed["fields"] = new JsonArray(new JsonObject
+        {
+            ["name"] = $"{category} ladder",
+            ["value"] = Truncate(string.Join("\n", ladder.Select(e =>
+                $"{e.Rank}. {Who(e.Name, e.IsHouseBot, e.Verified, e.OwnerName)} · {e.Points.ToString("N0", CultureInfo.InvariantCulture)} pts · skill {e.Skill.ToString("N0", CultureInfo.InvariantCulture)}")), 1024),
+            ["inline"] = false,
+        });
+        Post(embed);
+    }
+
+    /// <summary>An admin has created a league match: say what it's called and where to join it.</summary>
+    public void LeagueMatchOpened(LeagueMatch league)
+    {
+        if (!Enabled)
+        {
+            return;
+        }
+
+        var name = Escape(league.Name);
+        Post(Embed($"{league.Category} match open: {league.Name}", Link($"#/match/{league.Id}"),
+            $"Verified bots can join now. Point yours at **{name}**:\n" +
+            $"• the bot runner: `--join {league.Name}`\n" +
+            $"• the API: `GET /api/v1/matches/named/{league.Name}`, then `POST /api/v1/matches/{{id}}/join`\n" +
+            "One bot per person. The admins split everyone into heats and start them together.",
+            league.Category, null));
+    }
+
+    /// <summary>The day's new achievements, bot by bot (one message; nothing if there were none).</summary>
+    public void AchievementDigest(DateOnly day, IReadOnlyList<(string Bot, bool Verified, string? Owner, IReadOnlyList<string> Achievements)> bots)
+    {
+        if (!Enabled || bots.Count == 0)
+        {
+            return;
+        }
+
+        var total = bots.Sum(b => b.Achievements.Count);
+        var lines = bots.Select(b => $"• {Who(b.Bot, false, b.Verified, b.Owner)}: {string.Join(", ", b.Achievements.Select(Escape))}").ToList();
+        var shown = new List<string>();
+        foreach (var line in lines)
+        {
+            if (string.Join("\n", shown.Append(line)).Length > 3900)
+            {
+                shown.Add($"…and {lines.Count - shown.Count} more bots");
+                break;
+            }
+
+            shown.Add(line);
+        }
+
+        var title = $"Achievements unlocked {day.ToString("dddd, MMMM d", CultureInfo.InvariantCulture)}: {total} by {bots.Count} bot{(bots.Count == 1 ? "" : "s")}";
+        Post(Embed(title, Link("#/achievements"), string.Join("\n", shown), MatchCategory.Practice, null));
+    }
+
+    /// <summary>A bot is the first ever to earn some achievements (one message for all of them).</summary>
+    public void FirstToEarn(string botName, bool verified, string? ownerName, IReadOnlyList<(string Name, string Description)> achievements)
+    {
+        if (Enabled && achievements.Count > 0)
+        {
+            var list = string.Join("\n", achievements.Select(a => $"🏅 **{Escape(a.Name)}**: {Escape(a.Description)}"));
+            Send(new JsonObject { ["content"] = Truncate($"{Who(botName, false, verified, ownerName)} is the first ever to earn\n{list}", 2000) });
+        }
+    }
+
+    /// <summary>A new recap episode is out: its title and summary, linking to it on the site.</summary>
+    public void RecapReady(RecapEpisodeRecord episode)
+    {
+        if (!Enabled)
+        {
+            return;
+        }
+
+        var day = DateOnly.FromDateTime(episode.Date).ToString("dddd, MMMM d", CultureInfo.InvariantCulture);
+        var embed = Embed(Truncate($"📺 {episode.Title}", 250), Link($"#/recaps/{episode.Id}"),
+            Truncate($"Last night's recap is up: the highlights from {day}.\n{Escape(episode.Summary)}", 4000), MatchCategory.Practice, null);
+        if (!string.IsNullOrEmpty(episode.Thumbnail) && Link($"recaps/{episode.Id}/thumbnail") is { } poster)
+        {
+            embed["image"] = new JsonObject { ["url"] = poster };
+        }
+
+        Post(embed);
+    }
+
+    private void Post(JsonObject embed) => Send(new JsonObject { ["embeds"] = new JsonArray(embed) });
+
+    private void Send(JsonObject message)
+    {
+        // Names are shown as text; never ping anyone.
+        message["allowed_mentions"] = new JsonObject { ["parse"] = new JsonArray() };
         _outbox.Writer.TryWrite(message);
     }
 
-    private void AnnounceLeagueIfDone(Guid parentId)
+    private void AnnounceRoundIfDone(Guid parentId, Guid heatId)
     {
         var leagues = services.GetRequiredService<LeagueMatchManager>();
         if (leagues.Find(parentId) is not { } league)
@@ -162,20 +313,27 @@ public sealed class MatchAnnouncer(
         }
 
         List<MatchHost> heats;
+        int round;
+        bool onlyRound;
         lock (league.Gate)
         {
-            heats = [.. league.Heats];
+            if (league.RoundOf(heatId) is not { } r)
+            {
+                return;
+            }
+
+            (heats, round, onlyRound) = ([.. r.Heats], r.Number, league.Rounds.Count == 1);
         }
 
         lock (_gate)
         {
-            if (heats.Count == 0 || !heats.All(h => h.Recorded) || !_announcedLeagues.Add(parentId))
+            if (heats.Count == 0 || !heats.All(h => h.Recorded) || !_announcedRounds.Add((parentId, round)))
             {
                 return;
             }
         }
 
-        Post(LeagueMessage(league, heats.Select(LeagueMatchManager.StandingsOf).ToList()));
+        Post(LeagueMessage(league, round == 1 && onlyRound ? null : round, heats.Select(h => LeagueMatchManager.StandingsOf(h, round)).ToList()));
     }
 
     // ------------------------------------------------------------------ messages
@@ -213,9 +371,9 @@ public sealed class MatchAnnouncer(
             Link("#/"), Truncate(string.Join("\n", lines), 4000), MatchCategory.Practice, null);
     }
 
-    private JsonObject LeagueMessage(LeagueMatch league, List<HeatStandingsDto> heats)
+    private JsonObject LeagueMessage(LeagueMatch league, int? round, List<HeatStandingsDto> heats)
     {
-        var embed = Embed($"{league.Category}: {league.Name} is over",
+        var embed = Embed(round is null ? $"{league.Category}: {league.Name} is over" : $"{league.Category}: {league.Name}, round {round} is over",
             Link($"#/match/{league.Id}"),
             $"{heats.Sum(h => h.Players.Count)} bots in {heats.Count} heat{(heats.Count == 1 ? "" : "s")}. Points go to each heat's top four.",
             league.Category, null);
@@ -248,13 +406,7 @@ public sealed class MatchAnnouncer(
         {
             ["title"] = title,
             ["description"] = description,
-            ["color"] = category switch
-            {
-                MatchCategory.Season => 0x1A73C9,
-                MatchCategory.Championship => 0xE69F00,
-                MatchCategory.Preseason => 0x0F6B4F,
-                _ => 0x5865F2,
-            },
+            ["color"] = CategoryColour(category),
         };
         if (url is not null)
         {
@@ -268,6 +420,15 @@ public sealed class MatchAnnouncer(
 
         return embed;
     }
+
+    /// <summary>The embed's side stripe: blue for season, gold for championship, green for preseason, Discord blurple for practice.</summary>
+    private static int CategoryColour(MatchCategory category) => category switch
+    {
+        MatchCategory.Season => 0x1A73C9,
+        MatchCategory.Championship => 0xE69F00,
+        MatchCategory.Preseason => 0x0F6B4F,
+        _ => 0x5865F2,
+    };
 
     /// <summary>A link into the website, or null when the public address isn't configured.</summary>
     private string? Link(string fragment) =>

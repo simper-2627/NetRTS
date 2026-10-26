@@ -3,10 +3,12 @@ using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using NetRts.Bots;
 using NetRts.Server;
+using NetRts.Server.Achievements;
 using NetRts.Server.Auth;
 using NetRts.Server.Data;
 using NetRts.Server.Endpoints;
 using NetRts.Server.Matches;
+using NetRts.Server.Recaps;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
@@ -40,10 +42,28 @@ builder.Services.AddSingleton<MatchMetrics>();
 builder.Services.AddHttpClient<IDiscordWebhook, DiscordWebhook>();
 builder.Services.AddSingleton<MatchAnnouncer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MatchAnnouncer>());
+builder.Services.Configure<RecapOptions>(builder.Configuration.GetSection(RecapOptions.Section));
+builder.Services.AddSingleton<LadderSnapshots>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<LadderSnapshots>());
+builder.Services.AddScoped<RecapBrief>();
+builder.Services.AddSingleton<RecapVideos>();
+builder.Services.AddHostedService<RecapLibrary>();
+builder.Services.AddSingleton<RecapAnnouncer>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<RecapAnnouncer>());
+// Recap videos live in blob storage: Azurite under Aspire, an Azure storage account in production
+// (ConnectionStrings__recaps = https://<account>.blob.core.windows.net/, signed in with the app's identity).
+if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("recaps")))
+{
+    builder.AddAzureBlobServiceClient("recaps");
+}
+
+builder.Services.AddSingleton<AchievementService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AchievementService>());
 builder.Services.AddSingleton<MatchRecorder>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MatchRecorder>());
 builder.Services.AddSingleton<MatchManager>();
 builder.Services.AddSingleton<LeagueMatchManager>();
+builder.Services.AddSingleton<LeagueFinalizer>();
 builder.Services.AddSingleton<ReplayFrameStore>();
 builder.Services.AddSingleton<Presence>();
 builder.Services.AddHostedService<MatchHousekeeper>();
@@ -58,7 +78,7 @@ builder.Services.AddNetRtsRateLimits(options);
 builder.Services.AddCors(cors => cors.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddNetRtsOpenApi();
 builder.Services.Configure<RouteHandlerOptions>(o => o.ThrowOnBadRequest = true);
-builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = 256 * 1024);
+builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = ApiErrors.MaxRequestBodyBytes);
 // Brotli or gzip for the site's JavaScript, CSS, JSON and HTML: three.js alone shrinks from 690 KB
 // to under 200 KB, which is most of what the 3D view waits for on a slow connection.
 builder.Services.AddResponseCompression(o =>
@@ -92,6 +112,9 @@ app.MapDefaultEndpoints();
 app.MapPlayerEndpoints();
 app.MapMatchEndpoints();
 app.MapAccountEndpoints();
+app.MapAchievementEndpoints();
+app.MapPeopleEndpoints();
+app.MapRecapEndpoints();
 app.MapFallback("/api/{**path}", () => ApiErrors.Error(404, "NOT_FOUND", "No such API endpoint. See /scalar."));
 
 await app.RunAsync();
@@ -101,6 +124,7 @@ static async Task InitializeDatabaseAsync(IServiceProvider services)
     await using var scope = services.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<NetRtsDb>();
     await DatabaseMigrator.MigrateAsync(db, scope.ServiceProvider.GetRequiredService<ILogger<NetRtsDb>>());
+    await SkillBackfill.RunAsync(db, scope.ServiceProvider.GetRequiredService<ILogger<NetRtsDb>>());
 
     var directory = services.GetRequiredService<HouseBotDirectory>();
     foreach (var bot in HouseBots.All)

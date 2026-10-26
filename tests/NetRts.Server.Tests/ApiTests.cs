@@ -142,6 +142,23 @@ public class ApiTests(ServerFactory factory) : IClassFixture<ServerFactory>
     }
 
     [Fact]
+    public async Task Oversized_requests_get_a_structured_error()
+    {
+        var (client, player) = await factory.NewPlayerAsync();
+        var match = await client.CreateMatchAsync(new CreateMatchRequest { HouseBots = ["sitter"] }, Ct);
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", player.ApiKey);
+        var unitIds = string.Join(",", Enumerable.Range(1, 82_000));
+
+        var response = await http.PostAsync($"/api/v1/matches/{match.MatchId}/commands",
+            new StringContent($$"""{"commands":[{"type":"Move","unitIds":[{{unitIds}}],"x":5,"y":5}]}""",
+                System.Text.Encoding.UTF8, "application/json"), Ct);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Equal("REQUEST_TOO_LARGE", (await response.ErrorAsync()).Code);
+    }
+
+    [Fact]
     public async Task Waiting_matches_start_when_the_last_seat_is_filled()
     {
         var (host, _) = await factory.NewPlayerAsync();
@@ -236,6 +253,56 @@ public class ApiTests(ServerFactory factory) : IClassFixture<ServerFactory>
 
         var history = await factory.CreateClient().GetFromJsonAsync<List<MatchSummaryDto>>("/api/v1/matches/history", NetRtsClient.JsonOptions, Ct);
         Assert.Contains(history!, m => m.MatchId == match.MatchId);
+    }
+
+    [Fact]
+    public async Task The_archive_pages_through_finished_matches_and_finds_them_by_bot_or_owner_name()
+    {
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var owner = factory.ClientFor(await factory.NewAccountAsync(nickname: $"Owner {tag}"));
+        var reg = await (await owner.PostAsJsonAsync("/api/v1/account/bots", new RegisterPlayerRequest { Name = $"arc-{tag}" }, Ct))
+            .Content.ReadFromJsonAsync<RegisterPlayerResponse>(NetRtsClient.JsonOptions, Ct);
+        var mine = new NetRtsClient(factory.CreateClient(), reg!.ApiKey);
+        var (rival, rivalInfo) = await factory.NewPlayerAsync($"riv{tag}");
+
+        var played = new List<Guid>();
+        for (var i = 0; i < 3; i++)
+        {
+            var match = await mine.CreateMatchAsync(new CreateMatchRequest(), Ct);
+            await rival.JoinMatchAsync(match.MatchId, Ct);
+            await rival.SurrenderAsync(match.MatchId, Ct);
+            var host = factory.Matches.Get(match.MatchId)!;
+            while (!host.Recorded)
+            {
+                await Task.Delay(20, Ct);
+            }
+
+            played.Add(match.MatchId);
+        }
+
+        var solo = await mine.CreateMatchAsync(new CreateMatchRequest { HouseBots = ["sitter"] }, Ct);
+        await mine.SurrenderAsync(solo.MatchId, Ct);
+        while (!factory.Matches.Get(solo.MatchId)!.Recorded)
+        {
+            await Task.Delay(20, Ct);
+        }
+
+        var http = factory.CreateClient();
+        Task<MatchArchivePageDto?> Page(string query) =>
+            http.GetFromJsonAsync<MatchArchivePageDto>($"/api/v1/matches/archive?{query}", NetRtsClient.JsonOptions, Ct);
+
+        // By bot name, case-insensitively, a page at a time, newest first.
+        var first = await Page($"player=ARC-{tag}&limit=3");
+        Assert.Equal(4, first!.Total);
+        Assert.Equal([solo.MatchId, played[2], played[1]], first.Matches.Select(m => m.MatchId));
+        var second = await Page($"player=arc-{tag}&limit=3&skip=3");
+        Assert.Equal(played[0], Assert.Single(second!.Matches).MatchId);
+
+        // By the verified owner's name, and every comma-separated name must be in the match.
+        Assert.Equal(4, (await Page($"player={Uri.EscapeDataString($"owner {tag}")}"))!.Total);
+        var both = await Page($"player={Uri.EscapeDataString($"owner {tag}, {rivalInfo.Name}")}");
+        Assert.Equal(3, both!.Total);
+        Assert.Equal(0, (await Page($"player=arc-{tag},nobody-{tag}"))!.Total);
     }
 
     [Fact]
@@ -452,9 +519,12 @@ public class ApiTests(ServerFactory factory) : IClassFixture<ServerFactory>
         var http = factory.CreateClient();
 
         var rules = await http.GetFromJsonAsync<RulesDto>("/api/v1/rules", NetRtsClient.JsonOptions, Ct);
-        Assert.Equal(4, rules!.Units.Count);
-        Assert.Equal(5, rules.Buildings.Count);
-        Assert.Equal(8, rules.Upgrades.Count);
+        Assert.Equal(5, rules!.Units.Count);
+        Assert.Equal(6, rules.Buildings.Count);
+        Assert.Equal(9, rules.Upgrades.Count);
+        var trebuchet = rules.Units.Single(u => u.Type == UnitType.Trebuchet);
+        Assert.Equal((3, 3), (trebuchet.MinRange, trebuchet.ShotTicks));
+        Assert.Equal(UpgradeType.SiegeEngineering, rules.Buildings.Single(b => b.Type == BuildingType.SiegeWorkshop).RequiresUpgrade);
 
         var bots = await http.GetFromJsonAsync<List<HouseBotDto>>("/api/v1/bots", NetRtsClient.JsonOptions, Ct);
         Assert.Contains(bots!, b => b.Name == "rusher");
@@ -462,6 +532,97 @@ public class ApiTests(ServerFactory factory) : IClassFixture<ServerFactory>
         var missing = await http.GetAsync("/api/v1/nope", Ct);
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
         Assert.Equal("NOT_FOUND", (await missing.ErrorAsync()).Code);
+    }
+
+    [Fact]
+    public async Task Every_route_that_needs_a_running_match_says_it_has_not_started()
+    {
+        var (client, player) = await factory.NewPlayerAsync();
+        var match = await client.CreateMatchAsync(new CreateMatchRequest(), Ct);
+        var http = Authorized(player);
+
+        var responses = new[]
+        {
+            await http.GetAsync($"/api/v1/matches/{match.MatchId}/map", Ct),
+            await http.GetAsync($"/api/v1/matches/{match.MatchId}/state", Ct),
+            await http.GetAsync($"/api/v1/matches/{match.MatchId}/spectate", Ct),
+            await http.PostAsJsonAsync($"/api/v1/matches/{match.MatchId}/commands",
+                new SubmitCommandsRequest { Commands = [new CommandRequest { Type = CommandType.Stop, Units = "all" }] }, NetRtsClient.JsonOptions, Ct),
+        };
+
+        foreach (var response in responses)
+        {
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.Equal("MATCH_NOT_STARTED", (await response.ErrorAsync()).Code);
+        }
+    }
+
+    [Fact]
+    public async Task The_serum_is_issued_once_taken_once_and_boosts_commands_that_carry_it()
+    {
+        var (client, player) = await factory.NewPlayerAsync();
+        var match = await client.CreateMatchAsync(new CreateMatchRequest { HouseBots = ["sitter"] }, Ct);
+        var http = Authorized(player);
+        var url = $"/api/v1/matches/{match.MatchId}/superpower/superserum";
+        var jump = new { ifGrenadeThrown = "Jump on it" };
+
+        var early = await http.PostAsJsonAsync(url, jump, Ct);
+        Assert.Equal(HttpStatusCode.Conflict, early.StatusCode);
+        Assert.Equal("Is this a test?", (await early.ErrorAsync()).Message);
+
+        var key = await http.GetStringAsync(url, Ct);
+        Assert.Equal(32, key.Length);
+        Assert.Equal(key, await http.GetStringAsync(url, Ct));
+
+        var ran = await http.PostAsJsonAsync(url, new { ifGrenadeThrown = "run" }, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, ran.StatusCode);
+        Assert.Equal("Everybody else ran.", (await ran.ErrorAsync()).Message);
+
+        var taken = await http.PostAsJsonAsync(url, jump, Ct);
+        Assert.Equal(HttpStatusCode.OK, taken.StatusCode);
+        Assert.Contains("\"untilTick\":30", await taken.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(HttpStatusCode.Gone, (await http.PostAsJsonAsync(url, jump, Ct)).StatusCode);
+
+        foreach (var serum in new[] { key, "not-the-key", null })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/matches/{match.MatchId}/commands")
+            {
+                Content = JsonContent.Create(new SubmitCommandsRequest { Commands = [new CommandRequest { Type = CommandType.Stop, Units = "all" }] }, options: NetRtsClient.JsonOptions),
+            };
+            if (serum is not null)
+            {
+                request.Headers.Add("X-SUPERPOWER-SUPERSERUM", serum);
+            }
+
+            Assert.Equal(HttpStatusCode.OK, (await http.SendAsync(request, Ct)).StatusCode);
+        }
+
+        factory.Matches.Get(match.MatchId)!.Advance();
+        await client.SurrenderAsync(match.MatchId, Ct);
+        var replay = (await factory.CreateClient().GetFromJsonAsync<ReplayDto>($"/api/v1/matches/{match.MatchId}/replay", NetRtsClient.JsonOptions, Ct))!;
+        var slot = match.Players.Single(p => p.PlayerId == player.PlayerId).Slot;
+        Assert.Equal([true, false, false], replay.Commands.Where(c => c.Slot == slot).Select(c => c.Boosted));
+        Assert.Equal(0, Assert.Single(replay.Boosts!).Tick);
+    }
+
+    [Fact]
+    public async Task The_api_reference_leaves_out_internal_fields()
+    {
+        var document = await factory.CreateClient().GetStringAsync("/openapi/v1.json", Ct);
+
+        Assert.Contains("\"UnitDto\"", document);
+        Assert.DoesNotContain("superserum", document, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"effects\"", document);
+        Assert.DoesNotContain("\"boosted\"", document);
+        Assert.DoesNotContain("\"boosts\"", document);
+        Assert.DoesNotContain("Boost", document);
+    }
+
+    private HttpClient Authorized(RegisterPlayerResponse player)
+    {
+        var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", player.ApiKey);
+        return http;
     }
 
     private static async Task<T> WaitFor<T>(Func<Task<T>> fetch, Func<T, bool> done)

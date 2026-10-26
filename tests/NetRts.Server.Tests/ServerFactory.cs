@@ -20,6 +20,8 @@ public class ServerFactory : WebApplicationFactory<Program>
 
     protected virtual bool AutoTick => false;
 
+    public const string RecapKey = "test-recap-key";
+
     public const string TestAppInsights = "/subscriptions/sub/resourceGroups/rg/providers/microsoft.insights/components/ai";
 
     public MatchManager Matches => Services.GetRequiredService<MatchManager>();
@@ -36,10 +38,11 @@ public class ServerFactory : WebApplicationFactory<Program>
         builder.UseSetting("NetRts:RequestsPerSecond", "100000");
         builder.UseSetting("NetRts:RegistrationsPerMinutePerIp", "100000");
         builder.UseSetting("NetRts:AppInsightsResourceId", TestAppInsights);
+        builder.UseSetting("Recap:ApiKey", RecapKey);
     }
 
     /// <summary>Stores a Discord account, as a Discord sign-in would.</summary>
-    public async Task<AccountRecord> NewAccountAsync(bool admin = false, bool inServer = true, string? nickname = null)
+    public async Task<AccountRecord> NewAccountAsync(bool admin = false, bool inServer = true, string? nickname = null, string? discordId = null)
     {
         await using var scope = Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<NetRtsDb>();
@@ -47,7 +50,7 @@ public class ServerFactory : WebApplicationFactory<Program>
         var account = new AccountRecord
         {
             Id = id,
-            DiscordId = $"{Random.Shared.NextInt64():D}",
+            DiscordId = discordId ?? $"{Random.Shared.NextInt64():D}",
             Username = $"user-{id:N}"[..12],
             ServerNickname = nickname,
             InServer = inServer,

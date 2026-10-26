@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using NetRts.Bots;
 using NetRts.Engine;
 using NetRts.Protocol;
@@ -6,6 +8,14 @@ using NetRts.Protocol;
 namespace NetRts.Server.Matches;
 
 public sealed record MatchSettings(int MapWidth, int MapHeight, int Seed, int TickIntervalMs, int MaxTicks);
+
+public enum SerumOutcome
+{
+    Taken,
+    NotIssued,
+    AlreadyTaken,
+    NotRunning,
+}
 
 /// <summary>
 /// A player in a match. <c>Verified</c>: a Discord-verified person has claimed this bot;
@@ -28,6 +38,8 @@ public sealed class MatchHost
     private readonly object _gate = new();
     private readonly List<Seat> _seats = [];
     private readonly List<IBotStrategy?> _seatBots = []; // parallel to _seats; non-null for house bots
+    private readonly Dictionary<Guid, string> _serums = [];
+    private readonly HashSet<Guid> _serumsTaken = [];
     private readonly ILogger _logger;
     private readonly MatchMetrics _metrics;
     private readonly CancellationTokenSource _stop = new();
@@ -66,6 +78,9 @@ public sealed class MatchHost
 
     /// <summary>For a heat: the league match it belongs to. Heats start when the admin starts that match.</summary>
     public Guid? ParentMatchId { get; set; }
+
+    /// <summary>For a heat: play in the order the seats were filled, which the league match planned.</summary>
+    public bool KeepSeatOrder { get; set; }
     public DateTime CreatedAt { get; }
     public DateTime? CompletedAt { get; private set; }
     public bool Recorded { get; set; }
@@ -267,15 +282,19 @@ public sealed class MatchHost
             }
 
             // Where you start (your slot) shouldn't depend on when you joined. Shuffled with the match
-            // seed, so a match created with a fixed seed still plays out the same way.
-            var order = Enumerable.Range(0, _seats.Count).ToArray();
-            new Random(Settings.Seed).Shuffle(order);
-            var shuffledSeats = order.Select(i => _seats[i]).ToList();
-            var shuffledBots = order.Select(i => _seatBots[i]).ToList();
-            _seats.Clear();
-            _seats.AddRange(shuffledSeats);
-            _seatBots.Clear();
-            _seatBots.AddRange(shuffledBots);
+            // seed, so a match created with a fixed seed still plays out the same way. Heats are
+            // already seated by their league match.
+            if (!KeepSeatOrder)
+            {
+                var order = Enumerable.Range(0, _seats.Count).ToArray();
+                new Random(Settings.Seed).Shuffle(order);
+                var shuffledSeats = order.Select(i => _seats[i]).ToList();
+                var shuffledBots = order.Select(i => _seatBots[i]).ToList();
+                _seats.Clear();
+                _seats.AddRange(shuffledSeats);
+                _seatBots.Clear();
+                _seatBots.AddRange(shuffledBots);
+            }
 
             _sim = new GameSimulation(Id,
                 new GameConfig
@@ -338,12 +357,55 @@ public sealed class MatchHost
         }
     }
 
-    public SubmitCommandsResponse? Submit(Guid playerId, IReadOnlyList<CommandRequest> commands)
+    public SubmitCommandsResponse? Submit(Guid playerId, IReadOnlyList<CommandRequest> commands, string? serum = null)
     {
         lock (_gate)
         {
             var slot = _sim?.SlotOf(playerId) ?? -1;
-            return slot < 0 ? null : _sim!.Submit(slot, commands);
+            var boosted = serum is not null && _serums.TryGetValue(playerId, out var key)
+                          && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(serum), Encoding.UTF8.GetBytes(key));
+            return slot < 0 ? null : _sim!.Submit(slot, commands, boosted);
+        }
+    }
+
+    /// <summary>This player's serum for this match: the same random string every time they ask.</summary>
+    public string IssueSerum(Guid playerId)
+    {
+        lock (_gate)
+        {
+            if (!_serums.TryGetValue(playerId, out var key))
+            {
+                key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24)).Replace('+', '-').Replace('/', '_');
+                _serums[playerId] = key;
+            }
+
+            return key;
+        }
+    }
+
+    /// <summary>Takes the serum issued to this player. <c>UntilTick</c> is the last tick it lasts.</summary>
+    public (SerumOutcome Outcome, int UntilTick) TakeSerum(Guid playerId)
+    {
+        lock (_gate)
+        {
+            if (!_serums.ContainsKey(playerId))
+            {
+                return (SerumOutcome.NotIssued, 0);
+            }
+
+            if (_serumsTaken.Contains(playerId))
+            {
+                return (SerumOutcome.AlreadyTaken, 0);
+            }
+
+            var slot = _sim?.SlotOf(playerId) ?? -1;
+            if (slot < 0 || _sim!.Boost(slot) is not { } until)
+            {
+                return (SerumOutcome.NotRunning, 0);
+            }
+
+            _serumsTaken.Add(playerId);
+            return (SerumOutcome.Taken, until);
         }
     }
 

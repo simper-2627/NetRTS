@@ -1,5 +1,5 @@
-/* NetRTS play client. The colour tokens come from _content/NetRts.Web.Rendering/netrts.css (shared with
-   the spectator site); this file styles the lobby, the HUD and the game screen. */
+/* NetRTS play client. The colour tokens come from netrts.css (copied from the spectator site's
+   styles.css); this file styles the lobby, the HUD and the game screen. */
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }

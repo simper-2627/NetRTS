@@ -1,4 +1,5 @@
-/* NetRTS colour tokens, shared by the spectator site and the play client.
+/* NetRTS colour tokens for the play client: a copy of the :root palettes and the Snow College brand rules
+   in src/NetRts.Server/wwwroot/styles.css, which also holds the spectator layout. Keep the two in sync.
    The map renderer (mapview.js) reads the player, terrain, ore and fog colours from these custom
    properties, in both colour schemes and both brands (index.html sets data-theme / data-brand). */
 

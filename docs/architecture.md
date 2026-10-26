@@ -16,11 +16,10 @@
 Two browser front ends share one renderer:
 
 ```text
- src/NetRts.Web.Rendering (Razor class library: static files at _content/NetRts.Web.Rendering/)
-   mapview.js (2D canvas) · 3d/** + vendor/three (3D view) · lore.js · util.js · theme.js · netrts.css
-     ├── src/NetRts.Server/wwwroot — spectator site and replay viewer (SSE /spectate stream, /frames)
-     └── play/NetRts.PlayClient    — Blazor WebAssembly client for playing by hand: an API player
-                                     like any bot (fogged /state long-poll, one POST /commands per tick)
+ src/NetRts.Server/wwwroot — spectator site and replay viewer (SSE /spectate stream, /frames)
+   mapview.js (2D canvas) · 3d/** + vendor/three (3D view) · lore.js · util.js · theme.js · styles.css
+     └── linked into play/NetRts.PlayClient — Blazor WebAssembly client for playing by hand: an API
+         player like any bot (fogged /state long-poll, one POST /commands per tick)
 ```
 
 ## The engine is the product
@@ -69,11 +68,12 @@ quickly (`tests/NetRts.Engine.Tests`), including full matches between the house 
 
 ## Two front ends, one renderer
 
-- **`NetRts.Web.Rendering`** is a Razor class library with no code, only static web assets: the
-  canvas map (`MapView`), the three.js 3D view, the colour tokens (`netrts.css`) and the brand
-  vocabulary (`lore.js`). The server references it; in Development the files are served from the
-  library, a published app has them under `wwwroot/_content/`, and `UseStaticWebAssets()` covers a
-  build run in any other environment.
+- **The renderer stays in the spectator site's `wwwroot`**, where upstream keeps it: the canvas map
+  (`MapView`), `util.js`, the brand vocabulary (`lore.js`) and `theme.js`. The play client's
+  `.csproj` links those files (and the Snow "S" images) as static web assets at the same paths, with
+  the server's `wwwroot` as their content root, so `dotnet run` serves them from there and
+  `dotnet publish` copies them. Its colour tokens are `css/netrts.css`, a copy of the palettes in
+  the server's `styles.css`.
 - **The spectator site** (`NetRts.Server/wwwroot`) feeds `MapView` omniscient frames from the SSE
   stream or recorded replay chunks.
 - **The play client** (`play/NetRts.PlayClient`, Blazor WebAssembly, its own `NetRts.Play.sln`)

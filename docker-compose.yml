@@ -1,12 +1,11 @@
 services:
   netrts:
-    image: snowcollege/netrts:latest
+    build: .
     container_name: netrts
     ports:
       - "3000:8080"
     volumes:
       - badger-data:/home/app
-    restart: unless-stopped
 
 volumes:
   badger-data:

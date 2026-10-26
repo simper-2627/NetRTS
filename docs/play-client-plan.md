@@ -8,19 +8,17 @@ This file is the working plan. Each step is one commit; the box is ticked in tha
 
 ## Decisions (from the brief, refined after reading the code)
 
-- **Rendering RCL `src/NetRts.Web.Rendering`** (`Microsoft.NET.Sdk.Razor`, no components). Its
-  `wwwroot` holds what both sites share: `mapview.js`, `util.js`, `lore.js`, `theme.js`, `3d/**`,
-  `vendor/three/**`, the Snow College "S" images, and a new `netrts.css` with the colour tokens the
-  renderer reads through `cssVar()` (`--p0..15`, `--terrain-*`, `--ore`, `--fog`, …, in both colour
-  schemes and both brands) plus the classes the 3D view creates (`.map3d-canvas`, `.map3d-label*`).
-  Served at `_content/NetRts.Web.Rendering/…`.
-- **The server keeps** `index.html`, `app.js`, `spectate.js` (live view and replay viewer),
-  `account.js`, `league.js`, `styles.css` (minus the moved blocks) and `trailer-poster.jpg`. Its
-  pages import the renderer with relative URLs (`./_content/NetRts.Web.Rendering/mapview.js`), so a
-  module such as `lore.js` still has one URL and one instance whichever file imports it.
+- **No shared library; `src/` stays as upstream has it.** (Step a first moved the shared files into
+  a Razor class library, `src/NetRts.Web.Rendering`; that was undone because every upstream merge
+  brought back imports of the old paths. See the progress log.) The play client's `.csproj` links
+  `mapview.js`, `util.js`, `lore.js`, `theme.js` and the Snow College "S" images from
+  `src/NetRts.Server/wwwroot` and serves them at the same paths as the spectator site. Its
+  `css/netrts.css` holds the colour tokens the renderer reads through `cssVar()` (`--p0..15`,
+  `--terrain-*`, `--ore`, `--fog`, …, in both colour schemes and both brands), copied from the
+  server's `styles.css`.
 - **Play client `play/NetRts.PlayClient`** (Blazor WebAssembly, standalone, its own
   `play/NetRts.Play.sln`), also listed in `NetRts.sln` so a root `dotnet build` / `dotnet test`
-  covers it. References `NetRts.Protocol`, `NetRts.Web.Rendering` and `NetRts.Bots`:
+  covers it. References `NetRts.Protocol` and `NetRts.Bots`:
   `NetRtsClient` is a thin `HttpClient` wrapper with no server-only dependencies, so it works in
   WASM and the client long-polls with exactly the code bots use.
 - **Tests `play/NetRts.PlayClient.Tests`** (xUnit v3 on Microsoft.Testing.Platform, like the other
@@ -251,3 +249,12 @@ order replaces the earlier one), sounds, and a Playwright test that drives the b
   worker in id order and moves the camera to it; repeat to cycle. *Verified:* two controller
   tests; in the browser it showed 5 at the start, two clicks selected workers #72 and #73 and
   moved the camera, and it went dark and disabled once every worker was mining.
+- Shared files back where upstream keeps them: `src/NetRts.Web.Rendering` is gone and `src/` (and
+  `promo/`) match SnowSE/NetRTS again, because each upstream merge brought back imports of
+  `./util.js` and `./lore.js` that 404'd under the library layout. The play client links
+  `mapview.js`, `util.js`, `lore.js`, `theme.js` and the Snow "S" images from
+  `src/NetRts.Server/wwwroot` with `ContentRoot` set to that folder (with `Link` alone, `dotnet run`
+  served them empty) and its own copy of the tokens in `css/netrts.css`. *Verified:* the spectator
+  site loads every file from the root; in the play client under `dotnet run`, the lobby and a game
+  against `sitter` draw the map with all four scripts served with their full contents; `dotnet
+  publish` puts byte-identical copies at the root of `wwwroot`. Build clean, all tests pass.

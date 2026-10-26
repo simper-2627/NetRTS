@@ -6,7 +6,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { hqName, housingName, BUILDING_NAME, UPGRADE_NAME } from '/src/NetRts.Web.Rendering/wwwroot/lore.js';
+import { hqName, housingName, BUILDING_NAME, UPGRADE_NAME } from '/src/NetRts.Server/wwwroot/lore.js';
 
 export const TEAM = ['#f08a3c', '#56b4e9', '#2fc497', '#e68fc3', '#ff6b5e', '#b39ddb', '#d4d45a', '#4dd0e1',
   '#bcaaa4', '#f48fb1', '#9fa8da', '#aed581', '#ffab40', '#80cbc4', '#ce93d8', '#b0bec5'];

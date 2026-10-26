@@ -1,7 +1,7 @@
 // Badger Brawl commercials: a frame-exact timeline. window.seek(t) renders the frame at t seconds, so the
 // same page plays live in a browser (?cut=short|long) or renders to video one frame at a time (render.mjs).
 import { Battle3D, unitPos, frameAt, TEAM } from './game3d.js';
-import { MapView } from '/src/NetRts.Web.Rendering/wwwroot/mapview.js';
+import { MapView } from '/src/NetRts.Server/wwwroot/mapview.js';
 
 const $ = (s) => document.querySelector(s);
 const M = window.MATCHES;
@@ -274,7 +274,7 @@ function logoCard({ dur, sub = 'A Snow College bot-programming game · Ephraim, 
       const shine = prog(t, 0.2, 1.4);
       ui.innerHTML = `<div class="bg"></div>
         <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(${s});text-align:center;opacity:${p};white-space:nowrap">
-          <img src="/src/NetRts.Web.Rendering/wwwroot/images/snow-s-white.png" style="height:150px;filter:drop-shadow(0 0 30px rgba(124,192,255,0.6))">
+          <img src="/src/NetRts.Server/wwwroot/images/snow-s-white.png" style="height:150px;filter:drop-shadow(0 0 30px rgba(124,192,255,0.6))">
           <div style="font:700 190px/0.95 var(--head);letter-spacing:-0.03em;margin-top:18px;background:linear-gradient(100deg,#fff 0%,#fff ${shine * 100 - 12}%,#ffd9b8 ${shine * 100}%,#fff ${shine * 100 + 12}%,#fff 100%);-webkit-background-clip:text;color:transparent;filter:drop-shadow(0 0 40px rgba(124,192,255,0.45))">BADGER <span style="color:var(--orange);-webkit-text-fill-color:var(--orange)">BRAWL</span></div>
           <div style="font:600 40px var(--head);color:#b8c7d8;margin-top:26px;opacity:${sub1};transform:translateY(${(1 - sub1) * 20}px)">${sub}</div>
           <div class="kicker" style="margin-top:22px;opacity:${sub1}">${kicker}</div>
@@ -365,7 +365,7 @@ function endCard({ dur }) {
       const p = eOut(prog(t, 0, 0.7)), q = eOut(prog(t, 0.6, 1.2)), out = 1 - prog(t, dur - 0.6, dur);
       ui.innerHTML = `<div class="bg"></div><div style="position:absolute;inset:0;opacity:${out}">
         <div style="position:absolute;left:50%;top:250px;transform:translate(-50%,0) scale(${1.1 - 0.1 * p});text-align:center;opacity:${p};white-space:nowrap">
-          <img src="/src/NetRts.Web.Rendering/wwwroot/images/snow-s-white.png" style="height:120px;filter:drop-shadow(0 0 26px rgba(124,192,255,0.6))">
+          <img src="/src/NetRts.Server/wwwroot/images/snow-s-white.png" style="height:120px;filter:drop-shadow(0 0 26px rgba(124,192,255,0.6))">
           <div style="font:700 150px/1 var(--head);letter-spacing:-0.03em;margin-top:12px">BADGER <span class="orange">BRAWL</span></div></div>
         <div style="position:absolute;left:0;right:0;top:700px;text-align:center;opacity:${q}">
           <div class="codeword" style="font-size:46px;color:var(--sky)">github.com/SnowSE/NetRTS</div>

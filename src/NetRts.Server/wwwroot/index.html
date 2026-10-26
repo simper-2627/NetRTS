@@ -15,17 +15,16 @@
     document.documentElement.dataset.brand = brand;
     if (brand === 'snow') {
       document.title = 'Badger Brawl';
-      document.getElementById('favicon').href = '_content/NetRts.Web.Rendering/images/snow-s-blue.png';
+      document.getElementById('favicon').href = 'images/snow-s-blue.png';
     }
   </script>
-  <link rel="stylesheet" href="_content/NetRts.Web.Rendering/netrts.css">
   <link rel="stylesheet" href="styles.css">
-  <!-- three.js (r170, MIT) for the 3D match view, served from the NetRts.Web.Rendering library's vendor/ and loaded only when someone opens it. -->
+  <!-- three.js (r170, MIT) for the 3D match view, served from vendor/ and loaded only when someone opens it. -->
   <script type="importmap">
-    { "imports": { "three": "./_content/NetRts.Web.Rendering/vendor/three/three.module.min.js", "three/addons/": "./_content/NetRts.Web.Rendering/vendor/three/addons/" } }
+    { "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
   </script>
   <script type="module" src="app.js"></script>
-  <script type="module" src="./_content/NetRts.Web.Rendering/theme.js"></script>
+  <script type="module" src="theme.js"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -40,7 +39,7 @@
     </a>
     <a class="brand only-snow" href="#/" aria-label="Badger Brawl home">
       <!-- The official Snow College "S" (snow.edu brand downloads), used unaltered as the brand guide requires. -->
-      <img class="brand-s" src="_content/NetRts.Web.Rendering/images/snow-s-white.png" alt="" width="29" height="44">
+      <img class="brand-s" src="images/snow-s-white.png" alt="" width="29" height="44">
       <span>Badger Brawl<small>Snow College</small></span>
     </a>
     <nav aria-label="Primary">

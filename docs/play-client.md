@@ -46,8 +46,8 @@ or the competition floor. The client is a static site after
 files (it needs `application/wasm` for `.wasm` files and a fallback to `index.html` for deep links).
 
 The client has its own solution, `play/NetRts.Play.sln`, with only what it needs: the client, its
-tests, `NetRts.Protocol`, `NetRts.Bots` (for `NetRtsClient`) and `NetRts.Web.Rendering` (the map
-renderer it shares with the spectator site). The root `NetRts.sln` includes it too, so
+tests, `NetRts.Protocol` and `NetRts.Bots` (for `NetRtsClient`). The map renderer it shares with the
+spectator site is linked in from `src/NetRts.Server/wwwroot` by its `.csproj`. The root `NetRts.sln` includes it too, so
 `dotnet build` and `dotnet test` at the root cover everything.
 
 ## In the lobby
@@ -152,10 +152,9 @@ those before the rate limiter.)
    wwwroot/js/playview.js ...... MapView + an input canvas: selection rings, drag box, build ghost,
                                  minimap; reports clicks in tile coordinates to PlayController
         │ JS interop
- src/NetRts.Web.Rendering (Razor class library, static web assets at _content/NetRts.Web.Rendering/)
-   mapview.js, util.js, lore.js, theme.js, netrts.css, 3d/**, vendor/three/**
-        ▲ also used by
  src/NetRts.Server/wwwroot (the spectator site and replay viewer)
+   mapview.js, util.js, lore.js, theme.js, images/snow-s-*.png: linked in by the .csproj and
+   served at the same paths here
 ```
 
 The client is tested in `play/NetRts.PlayClient.Tests`: the state adapter (including the JSON

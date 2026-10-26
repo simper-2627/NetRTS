@@ -197,7 +197,13 @@ git clone https://github.com/SnowSE/NetRTS && cd NetRTS
 dotnet run --project src/NetRts.Server
 ```
 
-Or skip the SDK and run the image:
+To run the current checkout in Docker, build it locally with Compose:
+
+```bash
+docker compose up --build
+```
+
+Or skip the SDK and run the published image:
 
 ```bash
 docker run -p 8080:8080 -v badger-data:/home/app snowcollege/netrts
@@ -254,7 +260,7 @@ Under the badgers, the engine is **NetRTS** (say "Net R-T-S"): a **Net**work **R
 | `src/NetRts.Engine` | The game: map generation, rules, pathfinding, the tick simulation, fog-of-war views, replays. Pure, deterministic C#. |
 | `src/NetRts.Protocol` | JSON contract shared by the server, SDK and bots. |
 | `src/NetRts.Server` | ASP.NET Core host: API keys, matchmaking, tick loops, long-poll state, live spectator stream, Elo, the spectator site. |
-| `src/NetRts.Web.Rendering` | The map renderer (2D canvas and 3D view), colour tokens and the Snow College vocabulary (`lore.js`), shared by the spectator site and the play client. |
+| `src/NetRts.Server/wwwroot/lore.js` | The Snow College vocabulary: every name the spectator site shows. |
 | `play/NetRts.PlayClient` | Blazor WebAssembly client for playing by hand ([docs/play-client.md](docs/play-client.md)); its own solution is `play/NetRts.Play.sln`. |
 | `src/NetRts.Bots` | C# SDK (`NetRtsClient`, `BotLoop`) and the house badgers. |
 | `src/NetRts.BotRunner` | Command-line runner for any house-badger strategy. |

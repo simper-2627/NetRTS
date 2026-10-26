@@ -14,7 +14,7 @@
     <span>NetRTS <small>Play</small></span>
   </a>
   <a class="brand only-snow" href="" aria-label="Badger Brawl play: lobby">
-    <img class="brand-s" src="_content/NetRts.Web.Rendering/images/snow-s-white.png" alt="" width="29" height="44">
+    <img class="brand-s" src="images/snow-s-white.png" alt="" width="29" height="44">
     <span>Badger Brawl<small>Play</small></span>
   </a>
   <nav aria-label="Primary">
@@ -45,7 +45,7 @@
         if (firstRender)
         {
             // theme.js wires up the two toggle buttons when it loads, so load it once they exist.
-            await JS.InvokeAsync<IJSObjectReference>("import", "./_content/NetRts.Web.Rendering/theme.js");
+            await JS.InvokeAsync<IJSObjectReference>("import", "./theme.js");
         }
     }
 

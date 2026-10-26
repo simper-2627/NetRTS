@@ -1,11 +1,11 @@
-// The play client's map: the shared MapView from NetRts.Web.Rendering, plus what a player needs on a
-// second canvas stacked over it (selection rings, the drag box, order markers). MapView itself is
-// used as is: this file reads its camera (tileSize, offset) and its interpolated unit positions.
+// The play client's map: the spectator site's MapView (linked in from src/NetRts.Server/wwwroot), plus
+// what a player needs on a second canvas stacked over it (selection rings, the drag box, order markers).
+// MapView itself is used as is: this file reads its camera (tileSize, offset) and its interpolated unit positions.
 //
 // Input is reported to Blazor in tile coordinates; Blazor decides what a click means.
-import { MapView } from '../_content/NetRts.Web.Rendering/mapview.js';
-import { cssVar, playerColours } from '../_content/NetRts.Web.Rendering/util.js';
-import * as lore from '../_content/NetRts.Web.Rendering/lore.js';
+import { MapView } from '../mapview.js';
+import { cssVar, playerColours } from '../util.js';
+import * as lore from '../lore.js';
 
 /** The active brand's vocabulary from lore.js, so the HUD names things exactly as the map and the spectator site do. */
 export function loreTables() {

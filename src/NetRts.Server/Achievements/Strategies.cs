@@ -1,3 +1,4 @@
+using NetRts.Engine;
 using NetRts.Protocol;
 
 namespace NetRts.Server.Achievements;
@@ -42,7 +43,7 @@ public static class Strategies
         var archers = Trained(UnitType.Archer);
         var scouts = Trained(UnitType.Scout);
         var trebuchets = Trained(UnitType.Trebuchet);
-        var army = soldiers + archers + scouts + trebuchets;
+        var army = trained.Where(kv => !IsWorker(kv.Key)).Sum(kv => kv.Value);
         var early = stats.FirstCombatUnitTick is < 150;
 
         if (stats.SerumTaken)
@@ -104,4 +105,8 @@ public static class Strategies
             : soldiers * 10 >= army * 7 ? "soldier-army"
             : "mixed-army";
     }
+
+    /// <summary>Whether the rules make this unit type a worker; for a type they no longer have, whether it was the Worker.</summary>
+    public static bool IsWorker(UnitType type) =>
+        GameRules.Units.TryGetValue(type, out var stats) ? stats.IsWorker : type == UnitType.Worker;
 }

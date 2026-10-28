@@ -15,15 +15,18 @@ public sealed class BotView
         Rules = context.Rules;
 
         var me = State.You.Slot;
+        var workerTypes = Rules.Units.Where(u => u.IsWorker).Select(u => u.Type).ToHashSet();
+        var siegeTypes = Rules.Units.Where(u => u.ShotTicks > 0).Select(u => u.Type).ToHashSet();
+        var headquarters = Rules.Buildings.Where(b => b.IsHeadquarters).Select(b => b.Type).ToHashSet();
         MyUnits = State.Units.Where(u => u.Owner == me).ToList();
         MyBuildings = State.Buildings.Where(b => b.Owner == me).ToList();
         EnemyUnits = State.Units.Where(u => u.Owner != me).ToList();
         EnemyBuildings = State.Buildings.Where(b => b.Owner != me).ToList();
-        Workers = MyUnits.Where(u => u.Type == UnitType.Worker).ToList();
-        Army = MyUnits.Where(u => u.Type != UnitType.Worker).ToList();
-        Siege = Army.Where(u => u.Type == UnitType.Trebuchet).ToList();
-        Escorts = Army.Where(u => u.Type != UnitType.Trebuchet).ToList();
-        CommandCenter = MyBuildings.Where(b => b.Type == BuildingType.CommandCenter)
+        Workers = MyUnits.Where(u => workerTypes.Contains(u.Type)).ToList();
+        Army = MyUnits.Where(u => !workerTypes.Contains(u.Type)).ToList();
+        Siege = Army.Where(u => siegeTypes.Contains(u.Type)).ToList();
+        Escorts = Army.Where(u => !siegeTypes.Contains(u.Type)).ToList();
+        CommandCenter = MyBuildings.Where(b => headquarters.Contains(b.Type))
             .OrderByDescending(b => b.Completed).ThenBy(b => b.Id).FirstOrDefault();
 
         _blocked = State.Buildings.Select(b => (b.X, b.Y))
@@ -41,14 +44,25 @@ public sealed class BotView
     public IReadOnlyList<UnitDto> Workers { get; }
     public IReadOnlyList<UnitDto> Army { get; }
 
-    /// <summary>Our trebuchets.</summary>
+    /// <summary>Our siege units (trebuchets).</summary>
     public IReadOnlyList<UnitDto> Siege { get; }
 
-    /// <summary>Our army apart from the trebuchets: what escorts them.</summary>
+    /// <summary>Our army apart from the siege units: what escorts them.</summary>
     public IReadOnlyList<UnitDto> Escorts { get; }
+
+    /// <summary>Our headquarters (a Command Center), preferring a finished one.</summary>
     public BuildingDto? CommandCenter { get; }
 
-    public int UnitCost(UnitType type) => Rules.Units.First(u => u.Type == type).Cost;
+    /// <summary>What a unit costs us now; int.MaxValue, so never affordable, if these rules have no such unit.</summary>
+    public int UnitCost(UnitType type) => UnitStats(type)?.Cost ?? int.MaxValue;
+
+    /// <summary>Our stats for a unit type, research included; null if these rules have no such unit.</summary>
+    public UnitStatsDto? UnitStats(UnitType type) =>
+        State.You.UnitStats.FirstOrDefault(u => u.Type == type) ?? Rules.Units.FirstOrDefault(u => u.Type == type);
+
+    /// <summary>Our stats for a building type, research included; null if these rules have no such building.</summary>
+    public BuildingStatsDto? BuildingStats(BuildingType type) =>
+        State.You.BuildingStats.FirstOrDefault(b => b.Type == type) ?? Rules.Buildings.FirstOrDefault(b => b.Type == type);
 
     public bool IsOpen(int x, int y) =>
         x >= 0 && y >= 0 && x < Map.Width && y < Map.Height && Map.Terrain[y][x] == '.' && !_blocked.Contains((x, y));

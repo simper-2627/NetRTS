@@ -3,7 +3,9 @@
 A Badger Brawl bot is any program that can make HTTP requests. Each tick (1 second by default) the
 server simulates the world; between ticks your bot reads what it can see and queues orders.
 This guide covers everything a bot needs; live, typed API docs with a playground are at **`/scalar`**, and every
-balance number is served by **`GET /api/v1/rules`**.
+balance number is served by **`GET /api/v1/rules`**. The server reads its units, buildings and upgrades from a
+rules file, so a server may have different numbers, or even different unit and building names, from the
+tables below. Read `/rules` instead of hard-coding them.
 
 - [The loop](#the-loop)
 - [Authentication](#authentication)
@@ -224,7 +226,9 @@ every start position.
   "mapWidth": 64, "mapHeight": 64,
   "you": { "slot": 0, "resources": 380, "storageCapacity": 1500, "incomePerMinute": 240,
            "queuedCommands": 0, "queueCapacity": 500,
-           "upgrades": ["Weapons1"], "researching": [{ "upgrade": "Armor1", "percent": 40, "buildingId": 77 }] },
+           "upgrades": ["Weapons1"], "researching": [{ "upgrade": "Armor1", "percent": 40, "buildingId": 77 }],
+           "unitStats": [ { "type": "Soldier", "cost": 100, "damage": 11, … }, … ],
+           "buildingStats": [ { "type": "GuardTower", "cost": 125, "damage": 12, … }, … ] },
   "players": [ { "slot": 0, "name": "my-bot", "eliminated": false, "startPosition": {"x":7,"y":7},
                  "score": {"destruction":0,"economy":260,"survival":650,"total":910} }, … ],
   "visibility": ["0000111110…", …],            // one string per row y; char x is '1' if you can see it
@@ -255,6 +259,8 @@ every start position.
 - `shells` are siege shots in flight: yours, plus any landing on a tile you can see. A shell hits
   whatever enemy of its owner is on tile `(x, y)` when `landsTick` ends, so get off that tile.
 - `you.incomePerMinute` is the ore you banked in the last 60 ticks (a minute at normal speed).
+- `you.unitStats` and `you.buildingStats` are your stats right now: the `/rules` numbers with your
+  research applied. Take costs from here, because an upgrade can change them.
 - Every unit, building and deposit shares one id space, so an id is unambiguous.
 - Event kinds: `CommandFailed` (carries `commandId`), `UnitProduced`, `UnitLost`, `UnitKilled`,
   `BuildingStarted`, `BuildingCompleted`, `BuildingLost`, `BuildingDestroyed`, `ResearchCompleted`,
@@ -275,7 +281,7 @@ POST /api/v1/matches/{id}/commands
 | `Build` | units, `buildingType`, position | Workers walk next to the tile and break ground (the cost is paid then). Construction speed scales with the number of workers. Targeting your own unfinished building of the same type makes the workers help finish it. |
 | `Produce` | `buildingId`, `unitType`, optional `count`, optional position | Queue units (max 5 queued per building). Paid immediately. A position also sets the building's rally point. |
 | `Rally` | `buildingId`, position | Newly trained units walk to that tile. Workers rallied onto an ore deposit start mining it. |
-| `Research` | `buildingId` (a TechLab), `upgrade` | One research at a time per TechLab. Paid immediately. |
+| `Research` | `buildingId` (a TechLab, or any building with `canResearch`), `upgrade` | One research at a time per TechLab. Paid immediately. |
 | `Stop` | units | Drop the current order. |
 
 **Selecting units** — any combination of:
@@ -286,6 +292,10 @@ POST /api/v1/matches/{id}/commands
 - `"unitIds": [5, 6, 9]` — explicit ids; each must be a unit you own or the command is rejected.
 - `"unitType": "Worker"` — narrows the selection to that type. (For `Produce`, `unitType` is the
   unit to build instead.)
+
+`Gather` and `Build` only pick up units with `isWorker` in the rules (the Worker). Type names
+(`unitType`, `buildingType`, `upgrade`) are the ones `/rules` lists. Case doesn't matter, and an
+unknown name is rejected with `MISSING_UNIT_TYPE`, `MISSING_BUILDING_TYPE` or `MISSING_UPGRADE`.
 
 **Positions** — `"x": 12, "y": 9` or `"tile": 588` where `tile = y * mapWidth + x`.
 
@@ -365,7 +375,12 @@ gain the rest as they're built.
 | Harvesting1 / Harvesting2 | 100 / 200 | 30 / 45 | +1 ore per mining tick each |
 | SiegeEngineering | 200 | 60 | Unlocks the SiegeWorkshop |
 
-Upgrades apply instantly to existing and future units.
+An upgrade sets new values for the stats it lists, given in its `units` and `buildings` in `/rules`.
+For example, Weapons1 is `"units": { "Soldier": { "damage": 11 }, … }`, which takes a Soldier from 9
+damage to 11. The new values apply at once to your units and buildings of those types: the ones you
+already have and the ones you make later. A unit whose max HP changes keeps the same share of it (25
+of 50 becomes 50 of 100). If two upgrades set the same stat, the one researched last wins.
+`you.unitStats` / `you.buildingStats` show where you stand.
 
 **Economy** — workers mine 2 ore per tick (carrying up to 10), then walk it to the nearest
 drop-off. Ore beyond your storage capacity is lost.
@@ -379,8 +394,9 @@ and movement → shells due this tick land → combat → deaths → elimination
 
 ## Scoring and victory
 
-- **Elimination** — a player with no Command Center (finished or under construction) is out. The
-  last player standing wins.
+- **Elimination** — a player with no Command Center (finished or under construction) is out. More
+  precisely, no building with `isHeadquarters` in the rules, which is the Command Center unless the
+  server's rules say otherwise. The last player standing wins.
 - **Time limit** — at `maxTicks` (1800 by default, 30 minutes) the highest total score wins;
   equal totals are a draw.
 - **Surrender** — conceding eliminates you immediately.

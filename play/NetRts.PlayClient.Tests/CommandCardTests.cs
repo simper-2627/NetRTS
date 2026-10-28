@@ -75,9 +75,37 @@ public class CommandCardTests
 
         var buttons = CommandCard.BuildingButtons(state, Rules, lab, budget: 1000);
 
-        Assert.Equal([UpgradeType.Weapons2, UpgradeType.Armor1, UpgradeType.Mobility1, UpgradeType.Harvesting1], buttons.Select(b => ((ResearchAction)b.Action).Upgrade));
-        Assert.Equal(['W', 'A', 'M', 'H'], buttons.Select(b => b.Hotkey));
+        Assert.Equal([UpgradeType.Weapons2, UpgradeType.Armor1, UpgradeType.Mobility1, UpgradeType.Harvesting1, UpgradeType.SiegeEngineering],
+            buttons.Select(b => ((ResearchAction)b.Action).Upgrade));
+        Assert.Equal(['W', 'A', 'M', 'H', '?'], buttons.Select(b => b.Hotkey));
         Assert.All(buttons, b => Assert.Null(b.Blocked));
+    }
+
+    [Fact]
+    public void Costs_come_from_your_researched_stats_when_the_state_has_them()
+    {
+        var state = State() with
+        {
+            You = State().You with
+            {
+                UnitStats = [new UnitStatsDto { Type = UnitType.Worker, Cost = 70 }],
+                BuildingStats = [new BuildingStatsDto { Type = BuildingType.Barracks, Cost = 90 }],
+            },
+        };
+
+        Assert.Equal(70, Assert.Single(CommandCard.BuildingButtons(state, Rules, Building(state, 30), budget: 380)).Cost);
+        Assert.Equal(90, Button(CommandCard.BuildButtons(state, Rules, budget: 380), new BuildAction(BuildingType.Barracks)).Cost);
+        Assert.Equal(400, Button(CommandCard.BuildButtons(state, Rules, budget: 380), new BuildAction(BuildingType.CommandCenter)).Cost);
+    }
+
+    [Fact]
+    public void A_building_behind_research_says_which()
+    {
+        var state = State() with { You = State().You with { Upgrades = [] } }; // with a finished TechLab
+        Assert.Equal("Needs Siege Engineering", Button(CommandCard.BuildButtons(state, Rules, 1000), new BuildAction(BuildingType.SiegeWorkshop)).Blocked);
+
+        var researched = State() with { You = State().You with { Upgrades = [UpgradeType.SiegeEngineering] } };
+        Assert.Null(Button(CommandCard.BuildButtons(researched, Rules, 1000), new BuildAction(BuildingType.SiegeWorkshop)).Blocked);
     }
 
     [Fact]

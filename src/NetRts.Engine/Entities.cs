@@ -12,14 +12,20 @@ internal enum OrderKind
     Build,
 }
 
-internal sealed class PlayerState(Guid id, int slot, string name)
+internal sealed class PlayerState(Guid id, int slot, string name, RuleSet rules)
 {
     public Guid Id { get; } = id;
     public int Slot { get; } = slot;
     public string Name { get; } = name;
-    public int Resources { get; set; } = GameRules.StartingResources;
+    public int Resources { get; set; } = rules.Economy.StartingResources;
     public bool Eliminated { get; set; }
     public HashSet<UpgradeType> Upgrades { get; } = [];
+
+    /// <summary>This player's stats for each unit type: the rules' base stats with their research applied.</summary>
+    public Dictionary<UnitType, UnitStats> UnitStats { get; } = new(rules.Units);
+
+    /// <summary>This player's stats for each building type: the rules' base stats with their research applied.</summary>
+    public Dictionary<BuildingType, BuildingStats> BuildingStats { get; } = new(rules.Buildings);
     public Queue<QueuedCommand> CommandQueue { get; } = new();
 
     /// <summary>Ore banked per tick for the last 60 ticks, indexed by tick % 60.</summary>
@@ -50,7 +56,7 @@ internal sealed class PlayerState(Guid id, int slot, string name)
     public int DepositsExhausted { get; set; }
     public int CommandCentersDestroyed { get; set; }
     public int PeakWorkers { get; set; }
-    public int PeakResources { get; set; } = GameRules.StartingResources;
+    public int PeakResources { get; set; } = rules.Economy.StartingResources;
     public int OreWasted { get; set; }
     public int TowerKills { get; set; }
     public int SerumKills { get; set; }
@@ -59,14 +65,6 @@ internal sealed class PlayerState(Guid id, int slot, string name)
     public int CommandsFailed { get; set; }
     public int LongestWorkerIdleTicks { get; set; }
     public int LowestScoreSharePercent { get; set; } = 100;
-
-    public int Tier(UpgradeType tier1, UpgradeType tier2) =>
-        (Upgrades.Contains(tier1) ? 1 : 0) + (Upgrades.Contains(tier2) ? 1 : 0);
-
-    public int WeaponsBonus => Tier(UpgradeType.Weapons1, UpgradeType.Weapons2) * GameRules.WeaponsBonusPerTier;
-    public int ArmorBonus => Tier(UpgradeType.Armor1, UpgradeType.Armor2) * GameRules.ArmorBonusPerTier;
-    public int MobilityBonus => Tier(UpgradeType.Mobility1, UpgradeType.Mobility2) * GameRules.MobilityBonusPerTier;
-    public int HarvestingBonus => Tier(UpgradeType.Harvesting1, UpgradeType.Harvesting2) * GameRules.HarvestingBonusPerTier;
 }
 
 /// <summary>A command waiting in a player's queue.</summary>
@@ -89,21 +87,37 @@ internal abstract class Entity(int id, int owner, Point position)
     public int Hp { get; set; }
     public abstract int MaxHp { get; }
     public bool Dead => Hp <= 0;
+
+    /// <summary>Keeps HP at the same share of max HP when max HP changes (rounding down, but never to 0).</summary>
+    protected void RescaleHp(int oldMaxHp, int newMaxHp)
+    {
+        if (Hp > 0 && oldMaxHp != newMaxHp)
+        {
+            Hp = Math.Max(1, (int)((long)Hp * newMaxHp / oldMaxHp));
+        }
+    }
 }
 
 internal sealed class UnitEntity : Entity
 {
-    public UnitEntity(int id, int owner, UnitType type, Point position)
+    public UnitEntity(int id, int owner, UnitType type, UnitStats stats, Point position)
         : base(id, owner, position)
     {
         Type = type;
-        Stats = GameRules.Units[type];
+        Stats = stats;
         Hp = Stats.MaxHp;
     }
 
     public UnitType Type { get; }
-    public UnitStats Stats { get; }
+    public UnitStats Stats { get; private set; }
     public override int MaxHp => Stats.MaxHp;
+
+    /// <summary>Takes on upgraded stats.</summary>
+    public void SetStats(UnitStats stats)
+    {
+        RescaleHp(Stats.MaxHp, stats.MaxHp);
+        Stats = stats;
+    }
 
     public OrderKind Order { get; set; }
     public UnitActivity Activity { get; set; }
@@ -153,18 +167,18 @@ internal sealed class UnitEntity : Entity
 
 internal sealed class BuildingEntity : Entity
 {
-    public BuildingEntity(int id, int owner, BuildingType type, Point position, bool completed)
+    public BuildingEntity(int id, int owner, BuildingType type, BuildingStats stats, Point position, bool completed)
         : base(id, owner, position)
     {
         Type = type;
-        Stats = GameRules.Buildings[type];
+        Stats = stats;
         Completed = completed;
         Work = completed ? Stats.BuildWork : 0;
         Hp = completed ? Stats.MaxHp : HpForWork(0);
     }
 
     public BuildingType Type { get; }
-    public BuildingStats Stats { get; }
+    public BuildingStats Stats { get; private set; }
     public override int MaxHp => Stats.MaxHp;
     public bool Completed { get; private set; }
     public int Work { get; private set; }
@@ -177,6 +191,17 @@ internal sealed class BuildingEntity : Entity
     public ResearchItem? Research { get; set; }
 
     public int ConstructionPercent => Completed ? 100 : Work * 100 / Stats.BuildWork;
+
+    /// <summary>Takes on upgraded stats. A site whose build work shrank below what's done finishes with the next bit of work.</summary>
+    public void SetStats(BuildingStats stats)
+    {
+        RescaleHp(Stats.MaxHp, stats.MaxHp);
+        Stats = stats;
+        if (!Completed)
+        {
+            Work = Math.Min(Work, Stats.BuildWork - 1);
+        }
+    }
 
     /// <summary>Adds construction work; returns true when this completes the building.</summary>
     public bool AddWork(int amount)

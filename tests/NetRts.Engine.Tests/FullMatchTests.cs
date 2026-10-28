@@ -88,7 +88,7 @@ public class FullMatchTests
             if (siege.Count == 2 && siege.All(t => t.X > 25 && t.Y > 25 && t.Activity == UnitActivity.Moving))
             {
                 var (cx, cy) = (siege.Average(t => t.X), siege.Average(t => t.Y));
-                var escorts = units.Where(u => u.Type is not (UnitType.Worker or UnitType.Trebuchet)).ToList();
+                var escorts = units.Where(u => u.Type != UnitType.Worker && u.Type != UnitType.Trebuchet).ToList();
                 Assert.True(escorts.Count >= 8);
                 if (escorts.Count(e => Math.Max(Math.Abs(e.X - cx), Math.Abs(e.Y - cy)) <= 4) >= 8)
                 {

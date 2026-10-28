@@ -33,10 +33,10 @@ public sealed class Lore
             return Spaced(type.ToString());
         }
 
-        return (type, owner) switch
+        return owner switch
         {
-            (BuildingType.CommandCenter, { } slot) when _t.HqNames.Count > 0 => BySlot(_t.HqNames, slot),
-            (BuildingType.Barracks, { } slot) when _t.HousingNames.Count > 0 => BySlot(_t.HousingNames, slot),
+            { } slot when type == BuildingType.CommandCenter && _t.HqNames.Count > 0 => BySlot(_t.HqNames, slot),
+            { } slot when type == BuildingType.Barracks && _t.HousingNames.Count > 0 => BySlot(_t.HousingNames, slot),
             _ => _t.BuildingNames.GetValueOrDefault(type.ToString(), type.ToString()),
         };
     }

@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json.Nodes;
 using NetRts.Bots;
+using NetRts.Engine;
 using NetRts.Protocol;
 
 namespace NetRts.Server.Tests;
@@ -525,6 +527,8 @@ public class ApiTests(ServerFactory factory) : IClassFixture<ServerFactory>
         var trebuchet = rules.Units.Single(u => u.Type == UnitType.Trebuchet);
         Assert.Equal((3, 3), (trebuchet.MinRange, trebuchet.ShotTicks));
         Assert.Equal(UpgradeType.SiegeEngineering, rules.Buildings.Single(b => b.Type == BuildingType.SiegeWorkshop).RequiresUpgrade);
+        Assert.True(rules.Units.Single(u => u.Type == UnitType.Worker).IsWorker);
+        Assert.Equal(14, rules.Upgrades.Single(u => u.Type == UpgradeType.Weapons2).Buildings[BuildingType.GuardTower]["damage"]);
 
         var bots = await http.GetFromJsonAsync<List<HouseBotDto>>("/api/v1/bots", NetRtsClient.JsonOptions, Ct);
         Assert.Contains(bots!, b => b.Name == "rusher");
@@ -616,6 +620,16 @@ public class ApiTests(ServerFactory factory) : IClassFixture<ServerFactory>
         Assert.DoesNotContain("\"boosted\"", document);
         Assert.DoesNotContain("\"boosts\"", document);
         Assert.DoesNotContain("Boost", document);
+    }
+
+    [Fact]
+    public async Task The_api_reference_lists_the_type_names_from_the_rules_file()
+    {
+        var document = JsonNode.Parse(await factory.CreateClient().GetStringAsync("/openapi/v1.json", Ct))!;
+
+        var unitType = document["components"]!["schemas"]!["UnitType"]!;
+        Assert.Equal("string", unitType["type"]!.GetValue<string>());
+        Assert.Equal(GameRules.Units.Keys.Select(k => k.Name), unitType["enum"]!.AsArray().Select(n => n!.GetValue<string>()));
     }
 
     private HttpClient Authorized(RegisterPlayerResponse player)

@@ -1,0 +1,64 @@
+{
+  "economy": {
+    "startingResources": 500,
+    "startingBuilding": "CommandCenter",
+    "startingUnits": { "Worker": 5 },
+    "maxProductionQueue": 5,
+    "underConstructionVision": 2
+  },
+  "serum": { "ticks": 30, "factor": 2 },
+  "units": {
+    "Worker": { "cost": 50, "buildTicks": 8, "maxHp": 40, "damage": 4, "armor": 0, "range": 1, "attackCooldown": 1, "vision": 5, "speed": 10, "producedAt": "CommandCenter", "isWorker": true, "carryCapacity": 10, "gatherPerTick": 2 },
+    "Soldier": { "cost": 100, "buildTicks": 12, "maxHp": 110, "damage": 9, "armor": 1, "range": 1, "attackCooldown": 1, "vision": 5, "speed": 10, "producedAt": "Barracks", "serumBoost": true },
+    "Archer": { "cost": 125, "buildTicks": 14, "maxHp": 60, "damage": 12, "armor": 0, "range": 4, "attackCooldown": 2, "vision": 6, "speed": 9, "producedAt": "Barracks" },
+    "Scout": { "cost": 75, "buildTicks": 8, "maxHp": 55, "damage": 5, "armor": 0, "range": 1, "attackCooldown": 1, "vision": 8, "speed": 20, "producedAt": "Barracks" },
+    "Trebuchet": { "cost": 350, "buildTicks": 45, "maxHp": 150, "damage": 40, "armor": 0, "range": 7, "minRange": 3, "attackCooldown": 8, "shotTicks": 3, "vision": 7, "speed": 5, "producedAt": "SiegeWorkshop" }
+  },
+  "buildings": {
+    "CommandCenter": { "cost": 400, "buildWork": 80, "maxHp": 1500, "armor": 2, "vision": 6, "storageBonus": 1500, "isDropOff": true, "isHeadquarters": true },
+    "Barracks": { "cost": 150, "buildWork": 40, "maxHp": 700, "armor": 1, "vision": 6 },
+    "ResourceDepot": { "cost": 100, "buildWork": 25, "maxHp": 450, "armor": 1, "vision": 6, "storageBonus": 750, "isDropOff": true },
+    "TechLab": { "cost": 150, "buildWork": 40, "maxHp": 550, "armor": 1, "vision": 6, "canResearch": true, "requires": ["Barracks"] },
+    "GuardTower": { "cost": 125, "buildWork": 35, "maxHp": 500, "armor": 2, "vision": 7, "damage": 10, "range": 5, "attackCooldown": 1, "requires": ["Barracks"] },
+    "SiegeWorkshop": { "cost": 250, "buildWork": 60, "maxHp": 650, "armor": 1, "vision": 6, "requires": ["TechLab"], "requiresUpgrade": "SiegeEngineering" }
+  },
+  "upgrades": {
+    "Weapons1": {
+      "cost": 150, "researchTicks": 40, "effect": "+2 damage for all units and guard towers",
+      "units": { "Worker": { "damage": 6 }, "Soldier": { "damage": 11 }, "Archer": { "damage": 14 }, "Scout": { "damage": 7 }, "Trebuchet": { "damage": 42 } },
+      "buildings": { "GuardTower": { "damage": 12 } }
+    },
+    "Weapons2": {
+      "cost": 250, "researchTicks": 60, "requires": "Weapons1", "effect": "+2 more damage",
+      "units": { "Worker": { "damage": 8 }, "Soldier": { "damage": 13 }, "Archer": { "damage": 16 }, "Scout": { "damage": 9 }, "Trebuchet": { "damage": 44 } },
+      "buildings": { "GuardTower": { "damage": 14 } }
+    },
+    "Armor1": {
+      "cost": 150, "researchTicks": 40, "effect": "+1 armor for all units",
+      "units": { "Worker": { "armor": 1 }, "Soldier": { "armor": 2 }, "Archer": { "armor": 1 }, "Scout": { "armor": 1 }, "Trebuchet": { "armor": 1 } }
+    },
+    "Armor2": {
+      "cost": 250, "researchTicks": 60, "requires": "Armor1", "effect": "+1 more armor",
+      "units": { "Worker": { "armor": 2 }, "Soldier": { "armor": 3 }, "Archer": { "armor": 2 }, "Scout": { "armor": 2 }, "Trebuchet": { "armor": 2 } }
+    },
+    "Mobility1": {
+      "cost": 100, "researchTicks": 30, "effect": "+2 speed (tenths of a tile per tick) for all units",
+      "units": { "Worker": { "speed": 12 }, "Soldier": { "speed": 12 }, "Archer": { "speed": 11 }, "Scout": { "speed": 22 }, "Trebuchet": { "speed": 7 } }
+    },
+    "Mobility2": {
+      "cost": 200, "researchTicks": 45, "requires": "Mobility1", "effect": "+2 more speed",
+      "units": { "Worker": { "speed": 14 }, "Soldier": { "speed": 14 }, "Archer": { "speed": 13 }, "Scout": { "speed": 24 }, "Trebuchet": { "speed": 9 } }
+    },
+    "Harvesting1": {
+      "cost": 100, "researchTicks": 30, "effect": "+1 ore gathered per mining tick",
+      "units": { "Worker": { "gatherPerTick": 3 } }
+    },
+    "Harvesting2": {
+      "cost": 200, "researchTicks": 45, "requires": "Harvesting1", "effect": "+1 more ore per mining tick",
+      "units": { "Worker": { "gatherPerTick": 4 } }
+    },
+    "SiegeEngineering": {
+      "cost": 200, "researchTicks": 60, "effect": "Unlocks the SiegeWorkshop, which builds Trebuchets"
+    }
+  }
+}

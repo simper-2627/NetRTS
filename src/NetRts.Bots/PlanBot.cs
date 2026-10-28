@@ -137,7 +137,11 @@ public class PlanBot(string name, BotPlan plan) : IBotStrategy
             }
 
             // Steps are a strict order: if this one can't happen yet, save up for it.
-            var stats = view.Rules.Buildings.First(b => b.Type == step.Type);
+            if (view.BuildingStats(step.Type) is not { } stats)
+            {
+                continue; // these rules don't have it
+            }
+
             var prerequisitesMet = stats.Requires.All(r => view.MyBuildings.Any(b => b.Type == r && b.Completed))
                                    && (stats.RequiresUpgrade is not { } upgrade || view.State.You.Upgrades.Contains(upgrade));
             if (view.Workers.Count < step.MinWorkers || !prerequisitesMet || budget < stats.Cost)
@@ -210,8 +214,8 @@ public class PlanBot(string name, BotPlan plan) : IBotStrategy
                 continue;
             }
 
-            var stats = view.Rules.Upgrades.First(u => u.Type == upgrade);
-            if (stats.Requires is { } req && !you.Upgrades.Contains(req))
+            var stats = view.Rules.Upgrades.FirstOrDefault(u => u.Type == upgrade);
+            if (stats is null || (stats.Requires is { } req && !you.Upgrades.Contains(req)))
             {
                 continue;
             }

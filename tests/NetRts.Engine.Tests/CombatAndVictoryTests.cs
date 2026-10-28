@@ -214,9 +214,9 @@ public class CombatAndVictoryTests
     }
 
     [Theory]
-    [InlineData(false, UnitType.Soldier)]
-    [InlineData(true, UnitType.Archer)]
-    public void Only_soldiers_in_boosted_commands_are_boosted(bool boosted, UnitType type)
+    [InlineData(false, "Soldier")]
+    [InlineData(true, "Archer")]
+    public void Only_soldiers_in_boosted_commands_are_boosted(bool boosted, string type)
     {
         var sim = TestGames.New();
         var (attacker, target) = Duel(sim, type);

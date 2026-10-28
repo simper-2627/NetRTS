@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using NetRts.Protocol;
 
 namespace NetRts.Engine;
@@ -79,17 +80,18 @@ public sealed partial class GameSimulation
 
         foreach (var player in _players.Where(p => !p.Eliminated))
         {
-            if (!_buildings.Any(b => b.Owner == player.Slot && b.Type == BuildingType.CommandCenter))
+            if (!_buildings.Any(b => b.Owner == player.Slot && b.Stats.IsHeadquarters))
             {
-                Eliminate(player, "lost every Command Center");
+                var headquarters = Rules.Buildings.Where(b => b.Value.IsHeadquarters).Select(b => Regex.Replace(b.Key.Name, "([a-z])([A-Z0-9])", "$1 $2"));
+                Eliminate(player, $"lost every {string.Join(" and ", headquarters)}");
             }
         }
 
         foreach (var player in _players)
         {
-            if (player.SerumUntilTick - GameRules.SerumTicks + 1 == Tick)
+            if (player.SerumUntilTick - Rules.Serum.Ticks + 1 == Tick)
             {
-                Announce(player, "SuperSoldiers", $"Super soldiers activated. {GameRules.SerumTicks} ticks.");
+                Announce(player, "SuperSoldiers", $"Super soldiers activated. {Rules.Serum.Ticks} ticks.");
             }
 
             if (player.SerumUntilTick == Tick)
@@ -110,7 +112,7 @@ public sealed partial class GameSimulation
         var workers = new int[_players.Count];
         foreach (var unit in _units)
         {
-            if (unit.Type == UnitType.Worker)
+            if (unit.Stats.IsWorker)
             {
                 workers[unit.Owner]++;
             }
@@ -144,7 +146,7 @@ public sealed partial class GameSimulation
             var visibility = VisibilityFor(player.Slot);
             foreach (var b in _buildings.Where(b => b.Owner != player.Slot && IsVisible(visibility, b.Position)))
             {
-                if (b.Type == BuildingType.CommandCenter)
+                if (b.Stats.IsHeadquarters)
                 {
                     player.EnemyCommandCenterSeenTick ??= Tick;
                 }
@@ -182,15 +184,16 @@ public sealed partial class GameSimulation
             if (building.Production.Count > 0)
             {
                 var item = building.Production[0];
-                item.Progress = Math.Min(item.Progress + 1, GameRules.Units[item.Type].BuildTicks);
-                if (item.Progress >= GameRules.Units[item.Type].BuildTicks && FindFreeTileNear(building.Position) is { } spawn)
+                var buildTicks = owner.UnitStats[item.Type].BuildTicks;
+                item.Progress = Math.Min(item.Progress + 1, buildTicks);
+                if (item.Progress >= buildTicks && FindFreeTileNear(building.Position) is { } spawn)
                 {
                     building.Production.RemoveAt(0);
                     var unit = AddUnit(building.Owner, item.Type, spawn);
                     SendToRally(unit, building);
                     owner.UnitsProduced++;
                     owner.UnitsTrained[item.Type] = owner.UnitsTrained.GetValueOrDefault(item.Type) + 1;
-                    if (item.Type != UnitType.Worker)
+                    if (!unit.Stats.IsWorker)
                     {
                         owner.FirstCombatUnitTick ??= Tick;
                     }
@@ -202,12 +205,41 @@ public sealed partial class GameSimulation
             if (building.Research is { } research)
             {
                 research.Progress++;
-                if (research.Progress >= GameRules.Upgrades[research.Type].ResearchTicks)
+                if (research.Progress >= Rules.Upgrades[research.Type].ResearchTicks)
                 {
                     building.Research = null;
-                    owner.Upgrades.Add(research.Type);
+                    ApplyUpgrade(owner, research.Type);
                     AddEvent(owner, "ResearchCompleted", $"Research complete: {research.Type}", building.Id);
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sets the stats the upgrade lists for this player's unit and building types, on everything they
+    /// already have as well as what they make from now on. A later upgrade setting the same stat wins.
+    /// </summary>
+    private void ApplyUpgrade(PlayerState player, UpgradeType upgrade)
+    {
+        player.Upgrades.Add(upgrade);
+        var stats = Rules.Upgrades[upgrade];
+        foreach (var (type, changes) in stats.Units)
+        {
+            var upgraded = RuleSet.Apply(player.UnitStats[type], changes);
+            player.UnitStats[type] = upgraded;
+            foreach (var unit in _units.Where(u => u.Owner == player.Slot && u.Type == type))
+            {
+                unit.SetStats(upgraded);
+            }
+        }
+
+        foreach (var (type, changes) in stats.Buildings)
+        {
+            var upgraded = RuleSet.Apply(player.BuildingStats[type], changes);
+            player.BuildingStats[type] = upgraded;
+            foreach (var building in _buildings.Where(b => b.Owner == player.Slot && b.Type == type))
+            {
+                building.SetStats(upgraded);
             }
         }
     }
@@ -220,7 +252,7 @@ public sealed partial class GameSimulation
         }
 
         var depositId = _depositAt[Index(rally)];
-        if (unit.Type == UnitType.Worker && depositId != 0)
+        if (unit.Stats.IsWorker && depositId != 0)
         {
             unit.Order = OrderKind.Gather;
             unit.TargetId = depositId;
@@ -242,7 +274,7 @@ public sealed partial class GameSimulation
             return;
         }
 
-        if (unit.Type == UnitType.Worker)
+        if (unit.Stats.IsWorker)
         {
             unit.IdleTicks = unit.Order == OrderKind.Idle ? unit.IdleTicks + 1 : 0;
             var owner = _players[unit.Owner];
@@ -253,7 +285,7 @@ public sealed partial class GameSimulation
         {
             case OrderKind.Idle:
                 unit.Activity = UnitActivity.Idle;
-                if (unit.Type != UnitType.Worker && FindTarget(unit) is { } nearby)
+                if (!unit.Stats.IsWorker && FindTarget(unit) is { } nearby)
                 {
                     unit.Activity = UnitActivity.Attacking;
                     TryAttack(unit, nearby, attacks);
@@ -397,13 +429,13 @@ public sealed partial class GameSimulation
     {
         var damage = attacker switch
         {
-            UnitEntity u => (u.Stats.Damage + _players[u.Owner].WeaponsBonus) * Factor(u),
-            BuildingEntity b => b.Stats.Damage + _players[b.Owner].WeaponsBonus,
+            UnitEntity u => u.Stats.Damage * Factor(u),
+            BuildingEntity b => b.Stats.Damage,
             _ => 0,
         };
         var armor = target switch
         {
-            UnitEntity u => u.Stats.Armor + _players[u.Owner].ArmorBonus,
+            UnitEntity u => u.Stats.Armor,
             BuildingEntity { Completed: true } b => b.Stats.Armor,
             _ => 0,
         };
@@ -443,9 +475,9 @@ public sealed partial class GameSimulation
         candidates.OrderBy(e => from.Chebyshev(e.Position)).ThenBy(e => e.Hp).ThenBy(e => e.Id).FirstOrDefault();
 
     /// <summary>Tenths of a tile this unit moves per tick.</summary>
-    private int MoveSpeed(UnitEntity unit) => (unit.Stats.Speed + _players[unit.Owner].MobilityBonus) * Factor(unit);
+    private int MoveSpeed(UnitEntity unit) => unit.Stats.Speed * Factor(unit);
 
-    private int Factor(UnitEntity unit) => unit.Type == UnitType.Soldier && Tick <= unit.SerumUntilTick ? GameRules.SerumFactor : 1;
+    private int Factor(UnitEntity unit) => unit.Stats.SerumBoost && Tick <= unit.SerumUntilTick ? Rules.Serum.Factor : 1;
 
     private StepResult StepToward(UnitEntity unit, Point goal, int range)
     {
@@ -523,7 +555,7 @@ public sealed partial class GameSimulation
             unit.TargetId = deposit.Id;
         }
 
-        if (deposit is null || unit.Carrying >= GameRules.WorkerCarryCapacity)
+        if (deposit is null || unit.Carrying >= unit.Stats.CarryCapacity)
         {
             ReturnCargo(unit, player);
             return;
@@ -533,8 +565,7 @@ public sealed partial class GameSimulation
         {
             unit.ClearPath();
             unit.Activity = UnitActivity.Gathering;
-            var take = Math.Min(GameRules.GatherPerTick + player.HarvestingBonus,
-                Math.Min(deposit.Remaining, GameRules.WorkerCarryCapacity - unit.Carrying));
+            var take = Math.Min(unit.Stats.GatherPerTick, Math.Min(deposit.Remaining, unit.Stats.CarryCapacity - unit.Carrying));
             deposit.Hp -= take;
             unit.Carrying += take;
             unit.LastDepositPosition = deposit.Position;
@@ -620,7 +651,7 @@ public sealed partial class GameSimulation
                 if (building.AddWork(1))
                 {
                     player.BuildingsCompleted[building.Type] = player.BuildingsCompleted.GetValueOrDefault(building.Type) + 1;
-                    if (building.Type == BuildingType.Barracks)
+                    if (building.Stats.Produces.Any(u => !player.UnitStats[u].IsWorker))
                     {
                         player.FirstBarracksTick ??= Tick;
                     }
@@ -662,7 +693,7 @@ public sealed partial class GameSimulation
             return;
         }
 
-        player.Resources -= GameRules.Buildings[type].Cost;
+        player.Resources -= player.BuildingStats[type].Cost;
         var placed = AddBuilding(unit.Owner, type, site, completed: false);
         foreach (var standing in _units.Where(u => u.Position == site).ToList())
         {
@@ -714,7 +745,7 @@ public sealed partial class GameSimulation
             {
                 var killer = _players[kill.AttackerOwner];
                 killer.BuildingsDestroyed++;
-                if (building.Type == BuildingType.CommandCenter)
+                if (building.Stats.IsHeadquarters)
                 {
                     killer.CommandCentersDestroyed++;
                 }

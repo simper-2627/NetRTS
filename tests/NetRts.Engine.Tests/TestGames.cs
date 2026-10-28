@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using NetRts.Protocol;
 
 namespace NetRts.Engine.Tests;
@@ -11,9 +12,17 @@ internal static class TestGames
     /// A 64x64 two-player game. Slot 0's base is at (7,7); everything within 9 tiles of it is
     /// guaranteed rock-free, and (8..16, 8..16) is also clear of ore — a safe sandbox for scenarios.
     /// </summary>
-    public static GameSimulation New(int seed = 1, int maxTicks = 1800, int queueCapacity = 500, int commandsPerTick = 100) =>
-        new(Guid.NewGuid(), new GameConfig { Seed = seed, MaxTicks = maxTicks, QueueCapacity = queueCapacity, CommandsPerTick = commandsPerTick },
+    public static GameSimulation New(int seed = 1, int maxTicks = 1800, int queueCapacity = 500, int commandsPerTick = 100, RuleSet? rules = null) =>
+        new(Guid.NewGuid(), new GameConfig { Seed = seed, MaxTicks = maxTicks, QueueCapacity = queueCapacity, CommandsPerTick = commandsPerTick, Rules = rules ?? GameRules.Current },
             [new PlayerSeat(P1, "alpha"), new PlayerSeat(P2, "bravo")]);
+
+    /// <summary>The shipped rules file with some edits, as a dev would make them.</summary>
+    public static RuleSet Rules(Action<JsonObject> edit)
+    {
+        var file = JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, RuleSet.FileName)))!.AsObject();
+        edit(file);
+        return RuleSet.Parse(file.ToJsonString());
+    }
 
     public static CommandRequest Move(int x, int y, params int[] unitIds) =>
         new() { Type = CommandType.Move, UnitIds = unitIds, X = x, Y = y };

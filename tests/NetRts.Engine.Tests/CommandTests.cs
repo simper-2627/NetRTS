@@ -37,10 +37,10 @@ public class CommandTests
     }
 
     [Theory]
-    [InlineData(UnitType.Soldier)]
-    [InlineData(UnitType.Archer)]
-    [InlineData(UnitType.Scout)]
-    public void Reissuing_a_move_every_tick_does_not_slow_a_unit_down(UnitType type)
+    [InlineData("Soldier")]
+    [InlineData("Archer")]
+    [InlineData("Scout")]
+    public void Reissuing_a_move_every_tick_does_not_slow_a_unit_down(string type)
     {
         var sim = TestGames.New();
         var steady = sim.SpawnUnit(0, type, 4, 12);

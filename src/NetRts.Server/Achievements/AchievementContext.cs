@@ -136,7 +136,7 @@ public sealed class AchievementContext
     public bool OnlyTrained(UnitType type) =>
         Stats is { } s
         && s.UnitsTrained.GetValueOrDefault(type) > 0
-        && s.UnitsTrained.Where(kv => kv.Key != UnitType.Worker && kv.Key != type).All(kv => kv.Value == 0);
+        && s.UnitsTrained.Where(kv => !Strategies.IsWorker(kv.Key) && kv.Key != type).All(kv => kv.Value == 0);
 
     public DateTime LocalTime(DateTime utc) => TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), _zone);
 

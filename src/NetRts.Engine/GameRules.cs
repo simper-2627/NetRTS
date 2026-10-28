@@ -1,175 +1,114 @@
+using System.Text.Json.Serialization;
 using NetRts.Protocol;
 
 namespace NetRts.Engine;
 
-public sealed record UnitStats(
-    int Cost,
-    int BuildTicks,
-    int MaxHp,
-    int Damage,
-    int Armor,
-    int Range,
-    int AttackCooldown,
-    int Vision,
-    int Speed,
-    BuildingType ProducedAt,
-    int MinRange = 0,
-    int ShotTicks = 0);
+/// <summary>One unit type's stats, as written in the rules file (camelCase there).</summary>
+public sealed record UnitStats
+{
+    public required int Cost { get; init; }
+    public required int BuildTicks { get; init; }
+    public required int MaxHp { get; init; }
+    public required int Damage { get; init; }
+    public required int Armor { get; init; }
+    public required int Range { get; init; }
+    public required int AttackCooldown { get; init; }
+    public required int Vision { get; init; }
+    public required int Speed { get; init; }
 
-public sealed record BuildingStats(
-    int Cost,
-    int BuildWork,
-    int MaxHp,
-    int Armor,
-    int Vision,
-    int Damage,
-    int Range,
-    int AttackCooldown,
-    int StorageBonus,
-    bool IsDropOff,
-    IReadOnlyList<UnitType> Produces,
-    bool CanResearch,
-    IReadOnlyList<BuildingType> Requires,
-    UpgradeType? RequiresUpgrade = null);
+    /// <summary>The building that trains it; null if nothing does.</summary>
+    public BuildingType? ProducedAt { get; init; }
 
-public sealed record UpgradeStats(int Cost, int ResearchTicks, UpgradeType? Requires, string Effect);
+    public int MinRange { get; init; }
+    public int ShotTicks { get; init; }
 
-/// <summary>All balance numbers live here so they can be published to bots via GET /api/v1/rules.</summary>
+    /// <summary>Gathers and builds, and doesn't fight back on its own.</summary>
+    public bool IsWorker { get; init; }
+
+    public int CarryCapacity { get; init; }
+    public int GatherPerTick { get; init; }
+
+    /// <summary>Fights and moves faster under the super-soldier serum.</summary>
+    public bool SerumBoost { get; init; }
+}
+
+/// <summary>One building type's stats, as written in the rules file (camelCase there).</summary>
+public sealed record BuildingStats
+{
+    public required int Cost { get; init; }
+    public required int BuildWork { get; init; }
+    public required int MaxHp { get; init; }
+    public required int Armor { get; init; }
+    public required int Vision { get; init; }
+    public int Damage { get; init; }
+    public int Range { get; init; }
+    public int AttackCooldown { get; init; }
+    public int StorageBonus { get; init; }
+    public bool IsDropOff { get; init; }
+    public bool CanResearch { get; init; }
+    public IReadOnlyList<BuildingType> Requires { get; init; } = [];
+    public UpgradeType? RequiresUpgrade { get; init; }
+
+    /// <summary>Lose every one of these and you're eliminated.</summary>
+    public bool IsHeadquarters { get; init; }
+
+    /// <summary>The units whose <see cref="UnitStats.ProducedAt"/> is this building, in rules order.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<UnitType> Produces { get; init; } = [];
+}
+
+/// <summary>
+/// One upgrade. Researching it sets the listed stats (unit or building type, then stat name) for the
+/// researcher's units and buildings of those types, existing and future.
+/// </summary>
+public sealed record UpgradeStats
+{
+    public required int Cost { get; init; }
+    public required int ResearchTicks { get; init; }
+    public UpgradeType? Requires { get; init; }
+    public string Effect { get; init; } = "";
+    public IReadOnlyDictionary<UnitType, IReadOnlyDictionary<string, int>> Units { get; init; } = new Dictionary<UnitType, IReadOnlyDictionary<string, int>>();
+    public IReadOnlyDictionary<BuildingType, IReadOnlyDictionary<string, int>> Buildings { get; init; } = new Dictionary<BuildingType, IReadOnlyDictionary<string, int>>();
+}
+
+public sealed record EconomyRules
+{
+    public required int StartingResources { get; init; }
+    public required BuildingType StartingBuilding { get; init; }
+    public required IReadOnlyDictionary<UnitType, int> StartingUnits { get; init; }
+    public required int MaxProductionQueue { get; init; }
+    public required int UnderConstructionVision { get; init; }
+}
+
+/// <summary>The super-soldier serum: units with <see cref="UnitStats.SerumBoost"/> fight and move at <see cref="Factor"/>x for <see cref="Ticks"/> ticks.</summary>
+public sealed record SerumRules
+{
+    public required int Ticks { get; init; }
+    public required int Factor { get; init; }
+}
+
+/// <summary>
+/// The rules the server plays by, read once from <see cref="RuleSet.FileName"/> next to the app (copied
+/// there from <c>src/NetRts.Engine</c> on build), and published to bots via GET /api/v1/rules.
+/// </summary>
 public static class GameRules
 {
-    public const int StartingResources = 500;
-    public const int StartingWorkers = 5;
-    public const int WorkerCarryCapacity = 10;
-    public const int GatherPerTick = 2;
-    public const int MaxProductionQueue = 5;
-
     /// <summary>Movement points needed to step one tile; unit speed is in the same unit.</summary>
     public const int MovePointsPerTile = 10;
 
-    public const int UnderConstructionVision = 2;
+    public static RuleSet Current { get; } = RuleSet.Load(Path.Combine(AppContext.BaseDirectory, RuleSet.FileName));
 
-    public const int WeaponsBonusPerTier = 2;
-    public const int ArmorBonusPerTier = 1;
-    public const int MobilityBonusPerTier = 2;
-    public const int HarvestingBonusPerTier = 1;
+    public static IReadOnlyDictionary<UnitType, UnitStats> Units => Current.Units;
+    public static IReadOnlyDictionary<BuildingType, BuildingStats> Buildings => Current.Buildings;
+    public static IReadOnlyDictionary<UpgradeType, UpgradeStats> Upgrades => Current.Upgrades;
+    public static int StartingResources => Current.Economy.StartingResources;
+    public static int StartingWorkers => Current.StartingWorkers;
+    public static int MaxProductionQueue => Current.Economy.MaxProductionQueue;
 
-    internal const int SerumTicks = 30;
-    internal const int SerumFactor = 2;
+    internal static int SerumTicks => Current.Serum.Ticks;
 
-    public static readonly IReadOnlyDictionary<UnitType, UnitStats> Units = new Dictionary<UnitType, UnitStats>
-    {
-        [UnitType.Worker] = new(Cost: 50, BuildTicks: 8, MaxHp: 40, Damage: 4, Armor: 0, Range: 1, AttackCooldown: 1, Vision: 5, Speed: 10, ProducedAt: BuildingType.CommandCenter),
-        [UnitType.Soldier] = new(Cost: 100, BuildTicks: 12, MaxHp: 110, Damage: 9, Armor: 1, Range: 1, AttackCooldown: 1, Vision: 5, Speed: 10, ProducedAt: BuildingType.Barracks),
-        [UnitType.Archer] = new(Cost: 125, BuildTicks: 14, MaxHp: 60, Damage: 12, Armor: 0, Range: 4, AttackCooldown: 2, Vision: 6, Speed: 9, ProducedAt: BuildingType.Barracks),
-        [UnitType.Scout] = new(Cost: 75, BuildTicks: 8, MaxHp: 55, Damage: 5, Armor: 0, Range: 1, AttackCooldown: 1, Vision: 8, Speed: 20, ProducedAt: BuildingType.Barracks),
+    /// <inheritdoc cref="RuleSet.Version"/>
+    public static string Version => Current.Version;
 
-        // Outranges guard towers but can't hit anything close, and its shells land late, so it wants an escort.
-        [UnitType.Trebuchet] = new(Cost: 350, BuildTicks: 45, MaxHp: 150, Damage: 40, Armor: 0, Range: 7, AttackCooldown: 8, Vision: 7, Speed: 5,
-            ProducedAt: BuildingType.SiegeWorkshop, MinRange: 3, ShotTicks: 3),
-    };
-
-    public static readonly IReadOnlyDictionary<BuildingType, BuildingStats> Buildings = new Dictionary<BuildingType, BuildingStats>
-    {
-        [BuildingType.CommandCenter] = new(Cost: 400, BuildWork: 80, MaxHp: 1500, Armor: 2, Vision: 6, Damage: 0, Range: 0, AttackCooldown: 0,
-            StorageBonus: 1500, IsDropOff: true, Produces: [UnitType.Worker], CanResearch: false, Requires: []),
-        [BuildingType.Barracks] = new(Cost: 150, BuildWork: 40, MaxHp: 700, Armor: 1, Vision: 6, Damage: 0, Range: 0, AttackCooldown: 0,
-            StorageBonus: 0, IsDropOff: false, Produces: [UnitType.Soldier, UnitType.Archer, UnitType.Scout], CanResearch: false, Requires: []),
-        [BuildingType.ResourceDepot] = new(Cost: 100, BuildWork: 25, MaxHp: 450, Armor: 1, Vision: 6, Damage: 0, Range: 0, AttackCooldown: 0,
-            StorageBonus: 750, IsDropOff: true, Produces: [], CanResearch: false, Requires: []),
-        [BuildingType.TechLab] = new(Cost: 150, BuildWork: 40, MaxHp: 550, Armor: 1, Vision: 6, Damage: 0, Range: 0, AttackCooldown: 0,
-            StorageBonus: 0, IsDropOff: false, Produces: [], CanResearch: true, Requires: [BuildingType.Barracks]),
-        [BuildingType.GuardTower] = new(Cost: 125, BuildWork: 35, MaxHp: 500, Armor: 2, Vision: 7, Damage: 10, Range: 5, AttackCooldown: 1,
-            StorageBonus: 0, IsDropOff: false, Produces: [], CanResearch: false, Requires: [BuildingType.Barracks]),
-        [BuildingType.SiegeWorkshop] = new(Cost: 250, BuildWork: 60, MaxHp: 650, Armor: 1, Vision: 6, Damage: 0, Range: 0, AttackCooldown: 0,
-            StorageBonus: 0, IsDropOff: false, Produces: [UnitType.Trebuchet], CanResearch: false, Requires: [BuildingType.TechLab],
-            RequiresUpgrade: UpgradeType.SiegeEngineering),
-    };
-
-    public static readonly IReadOnlyDictionary<UpgradeType, UpgradeStats> Upgrades = new Dictionary<UpgradeType, UpgradeStats>
-    {
-        [UpgradeType.Weapons1] = new(150, 40, null, $"+{WeaponsBonusPerTier} damage for all units and guard towers"),
-        [UpgradeType.Weapons2] = new(250, 60, UpgradeType.Weapons1, $"+{WeaponsBonusPerTier} more damage"),
-        [UpgradeType.Armor1] = new(150, 40, null, $"+{ArmorBonusPerTier} armor for all units"),
-        [UpgradeType.Armor2] = new(250, 60, UpgradeType.Armor1, $"+{ArmorBonusPerTier} more armor"),
-        [UpgradeType.Mobility1] = new(100, 30, null, $"+{MobilityBonusPerTier} speed (tenths of a tile per tick) for all units"),
-        [UpgradeType.Mobility2] = new(200, 45, UpgradeType.Mobility1, $"+{MobilityBonusPerTier} more speed"),
-        [UpgradeType.Harvesting1] = new(100, 30, null, $"+{HarvestingBonusPerTier} ore gathered per mining tick"),
-        [UpgradeType.Harvesting2] = new(200, 45, UpgradeType.Harvesting1, $"+{HarvestingBonusPerTier} more ore per mining tick"),
-        [UpgradeType.SiegeEngineering] = new(200, 60, null, "Unlocks the SiegeWorkshop, which builds Trebuchets"),
-    };
-
-    /// <summary>
-    /// Identifies these rules and this simulation, e.g. "1-3f9a0c2b7d41". Recorded with every match: a
-    /// replay re-simulated under a different version may not play out the way the match did.
-    /// </summary>
-    public static string Version { get; } = $"{GameSimulation.Revision}-{Convert.ToHexStringLower(
-        System.Security.Cryptography.SHA256.HashData(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(ToDto())))[..12]}";
-
-    public static RulesDto ToDto() => new()
-    {
-        Units = Units.Select(kv => new UnitStatsDto
-        {
-            Type = kv.Key,
-            Cost = kv.Value.Cost,
-            BuildTicks = kv.Value.BuildTicks,
-            MaxHp = kv.Value.MaxHp,
-            Damage = kv.Value.Damage,
-            Armor = kv.Value.Armor,
-            Range = kv.Value.Range,
-            AttackCooldown = kv.Value.AttackCooldown,
-            Vision = kv.Value.Vision,
-            Speed = kv.Value.Speed,
-            ProducedAt = kv.Value.ProducedAt,
-            MinRange = kv.Value.MinRange,
-            ShotTicks = kv.Value.ShotTicks,
-        }).ToList(),
-        Buildings = Buildings.Select(kv => new BuildingStatsDto
-        {
-            Type = kv.Key,
-            Cost = kv.Value.Cost,
-            BuildWork = kv.Value.BuildWork,
-            MaxHp = kv.Value.MaxHp,
-            Armor = kv.Value.Armor,
-            Vision = kv.Value.Vision,
-            Damage = kv.Value.Damage,
-            Range = kv.Value.Range,
-            AttackCooldown = kv.Value.AttackCooldown,
-            StorageBonus = kv.Value.StorageBonus,
-            IsDropOff = kv.Value.IsDropOff,
-            Produces = kv.Value.Produces,
-            CanResearch = kv.Value.CanResearch,
-            Requires = kv.Value.Requires,
-            RequiresUpgrade = kv.Value.RequiresUpgrade,
-        }).ToList(),
-        Upgrades = Upgrades.Select(kv => new UpgradeStatsDto
-        {
-            Type = kv.Key,
-            Cost = kv.Value.Cost,
-            ResearchTicks = kv.Value.ResearchTicks,
-            Requires = kv.Value.Requires,
-            Effect = kv.Value.Effect,
-        }).ToList(),
-        Economy = new EconomyRulesDto
-        {
-            StartingResources = StartingResources,
-            StartingWorkers = StartingWorkers,
-            WorkerCarryCapacity = WorkerCarryCapacity,
-            GatherPerTick = GatherPerTick,
-            MaxProductionQueue = MaxProductionQueue,
-        },
-        Notes =
-        [
-            "Coordinates are (x, y) with (0, 0) at the top-left. tile = y * mapWidth + x.",
-            "Attack range and adjacency use Chebyshev distance (diagonals count as 1). Vision uses Euclidean distance.",
-            "Units may share tiles. Buildings, resource deposits and rock block movement.",
-            "Damage dealt = max(1, attacker damage - target armor). All attacks in a tick land simultaneously.",
-            "Unit costs are paid when production is queued; building costs when the first worker starts construction.",
-            "Ore beyond your storage capacity is lost. Storage = sum of StorageBonus of your completed buildings.",
-            "Siege units (ShotTicks > 0) lob shells at a tile: they land ShotTicks later and hit every enemy on that tile then. They can't fire inside MinRange.",
-            "Idle combat units fight back against enemies already in range. Attack-move (Attack with a position) engages anything seen en route.",
-            "A player with no Command Center (finished or under construction) is eliminated.",
-            "At the tick limit the highest total score wins; equal scores are a draw.",
-            "Score: destruction (value of enemy assets destroyed) + economy (ore banked) + survival (value of your living units and finished buildings).",
-        ],
-    };
+    public static RulesDto ToDto() => Current.ToDto();
 }

@@ -449,7 +449,7 @@ public sealed class PlayController
         var helping = state.Buildings.Any(b => b.X == x && b.Y == y);
         if (!helping)
         {
-            Spend(state, rules.Buildings.FirstOrDefault(b => b.Type == type)?.Cost ?? 0);
+            Spend(state, CommandCard.BuildingCost(state, rules, type));
         }
 
         if (!keepPlacing)

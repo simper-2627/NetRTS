@@ -23,7 +23,7 @@ public sealed partial class GameSimulation
 
     internal int Resources(int slot) => _players[slot].Resources;
 
-    internal void GrantUpgrade(int slot, UpgradeType upgrade) => _players[slot].Upgrades.Add(upgrade);
+    internal void GrantUpgrade(int slot, UpgradeType upgrade) => ApplyUpgrade(_players[slot], upgrade);
 
     internal void SetHp(int entityId, int hp) => _entities[entityId].Hp = hp;
 
@@ -58,7 +58,7 @@ public sealed partial class GameSimulation
         _units.Where(u => u.Owner == slot && (type is null || u.Type == type)).Select(u => u.Id);
 
     internal int CommandCenterId(int slot) =>
-        _buildings.First(b => b.Owner == slot && b.Type == BuildingType.CommandCenter).Id;
+        _buildings.First(b => b.Owner == slot && b.Stats.IsHeadquarters).Id;
 
     internal void Run(int ticks)
     {

@@ -19,6 +19,14 @@ public sealed partial class GameSimulation
 
     private static CommandError Error(string code, string message) => new(code, message);
 
+    /// <summary>Finds a type by name (case-insensitively, as bots may send it) and gives it as the rules spell it.</summary>
+    private static bool Known<T, TStats>(IReadOnlyDictionary<T, TStats> types, T? requested, out T type)
+        where T : struct, ITypeId<T>
+    {
+        type = types.Keys.FirstOrDefault(t => requested is { } r && t.Equals(r));
+        return type.Name is not null;
+    }
+
     /// <summary>
     /// Checks a command against the current state. Used both when it is submitted (strict: every
     /// explicitly listed unit must be yours) and again when it executes (lenient: units that died
@@ -109,9 +117,11 @@ public sealed partial class GameSimulation
 
             case CommandType.Build:
             {
-                if (request.BuildingType is not { } type || !Enum.IsDefined(type))
+                if (!Known(Rules.Buildings, request.BuildingType, out var type))
                 {
-                    return (null, Error("MISSING_BUILDING_TYPE", "Build needs a valid buildingType."));
+                    return (null, Error("MISSING_BUILDING_TYPE", request.BuildingType is { } unknown
+                        ? $"There is no building type {unknown}; see GET /api/v1/rules."
+                        : "Build needs a valid buildingType."));
                 }
 
                 if (position is not { } site)
@@ -160,7 +170,7 @@ public sealed partial class GameSimulation
             return Error("POSITION_OCCUPIED", $"An enemy unit is standing on {site}.");
         }
 
-        var stats = GameRules.Buildings[type];
+        var stats = player.BuildingStats[type];
         foreach (var required in stats.Requires)
         {
             if (!_buildings.Any(b => b.Owner == player.Slot && b.Type == required && b.Completed))
@@ -190,9 +200,11 @@ public sealed partial class GameSimulation
             return (null, error);
         }
 
-        if (request.UnitType is not { } unitType || !Enum.IsDefined(unitType))
+        if (!Known(Rules.Units, request.UnitType, out var unitType))
         {
-            return (null, Error("MISSING_UNIT_TYPE", "Produce needs a valid unitType."));
+            return (null, Error("MISSING_UNIT_TYPE", request.UnitType is { } unknown
+                ? $"There is no unit type {unknown}; see GET /api/v1/rules."
+                : "Produce needs a valid unitType."));
         }
 
         if (!building!.Stats.Produces.Contains(unitType))
@@ -212,7 +224,7 @@ public sealed partial class GameSimulation
                 $"Building {building.Id} has {building.Production.Count} queued; the limit is {GameRules.MaxProductionQueue}."));
         }
 
-        var cost = GameRules.Units[unitType].Cost * count;
+        var cost = player.UnitStats[unitType].Cost * count;
         if (player.Resources < cost)
         {
             return (null, Error("INSUFFICIENT_RESOURCES", $"{count} x {unitType} costs {cost}; you have {player.Resources}."));
@@ -261,12 +273,15 @@ public sealed partial class GameSimulation
 
         if (!building!.Stats.CanResearch)
         {
-            return (null, Error("CANNOT_RESEARCH", $"{building.Type} cannot research; use a TechLab."));
+            var labs = Rules.Buildings.Where(b => b.Value.CanResearch).Select(b => b.Key.Name).ToList();
+            return (null, Error("CANNOT_RESEARCH", $"{building.Type} cannot research{(labs.Count > 0 ? $"; use a {string.Join(" or ", labs)}" : "")}."));
         }
 
-        if (request.Upgrade is not { } upgrade || !Enum.IsDefined(upgrade))
+        if (!Known(Rules.Upgrades, request.Upgrade, out var upgrade))
         {
-            return (null, Error("MISSING_UPGRADE", "Research needs a valid upgrade."));
+            return (null, Error("MISSING_UPGRADE", request.Upgrade is { } unknown
+                ? $"There is no upgrade {unknown}; see GET /api/v1/rules."
+                : "Research needs a valid upgrade."));
         }
 
         if (player.Upgrades.Contains(upgrade))
@@ -281,10 +296,10 @@ public sealed partial class GameSimulation
 
         if (building.Research is not null)
         {
-            return (null, Error("BUILDING_BUSY", $"TechLab {building.Id} is already researching {building.Research.Type}."));
+            return (null, Error("BUILDING_BUSY", $"{building.Type} {building.Id} is already researching {building.Research.Type}."));
         }
 
-        var stats = GameRules.Upgrades[upgrade];
+        var stats = Rules.Upgrades[upgrade];
         if (stats.Requires is { } prerequisite && !player.Upgrades.Contains(prerequisite))
         {
             return (null, Error("MISSING_PREREQUISITE", $"{upgrade} requires {prerequisite}."));
@@ -366,7 +381,7 @@ public sealed partial class GameSimulation
 
         var units = _units.Where(u => selected.Contains(u.Id)
                                       && (request.UnitType is null || u.Type == request.UnitType)
-                                      && (!workersOnly || u.Type == UnitType.Worker))
+                                      && (!workersOnly || u.Stats.IsWorker))
                           .ToList();
 
         if (units.Count == 0)
@@ -531,7 +546,7 @@ public sealed partial class GameSimulation
                 break;
 
             case CommandType.Produce:
-                player.Resources -= GameRules.Units[command.UnitType!.Value].Cost * command.Count;
+                player.Resources -= player.UnitStats[command.UnitType!.Value].Cost * command.Count;
                 for (var i = 0; i < command.Count; i++)
                 {
                     command.Building!.Production.Add(new ProductionItem(command.UnitType.Value));
@@ -551,7 +566,7 @@ public sealed partial class GameSimulation
                 break;
 
             case CommandType.Research:
-                player.Resources -= GameRules.Upgrades[command.Upgrade!.Value].Cost;
+                player.Resources -= Rules.Upgrades[command.Upgrade!.Value].Cost;
                 command.Building!.Research = new ResearchItem(command.Upgrade.Value);
                 break;
         }

@@ -178,19 +178,19 @@ public sealed record PlayerMatchStatsDto
     /// <summary>Research completed.</summary>
     public IReadOnlyList<UpgradeType> Upgrades { get; init; } = [];
 
-    /// <summary>Tick the first Barracks was finished, if one was.</summary>
+    /// <summary>Tick the first building that trains non-workers (a Barracks) was finished, if one was.</summary>
     public int? FirstBarracksTick { get; init; }
 
-    /// <summary>Tick the first Soldier, Archer or Scout was ready, if one was.</summary>
+    /// <summary>Tick the first unit that isn't a worker (a Soldier, Archer, ...) was ready, if one was.</summary>
     public int? FirstCombatUnitTick { get; init; }
 
-    /// <summary>Tick this player first saw an enemy Command Center, if they did.</summary>
+    /// <summary>Tick this player first saw an enemy headquarters (Command Center), if they did.</summary>
     public int? EnemyCommandCenterSeenTick { get; init; }
 
     /// <summary>Resource deposits this player's workers mined dry.</summary>
     public int DepositsExhausted { get; init; }
 
-    /// <summary>Enemy Command Centers destroyed.</summary>
+    /// <summary>Enemy headquarters (Command Centers) destroyed.</summary>
     public int CommandCentersDestroyed { get; init; }
 
     /// <summary>Most workers alive at once.</summary>
@@ -226,10 +226,10 @@ public sealed record PlayerMatchStatsDto
     /// <summary>Different buildings given a rally point.</summary>
     public int BuildingsRallied { get; init; }
 
-    /// <summary>Completed guard towers standing when the match ended.</summary>
+    /// <summary>Completed guard towers (buildings that fire) standing when the match ended.</summary>
     public int GuardTowersStanding { get; init; }
 
-    /// <summary>Health of the player's healthiest Command Center when the match ended, in percent; null if they had none.</summary>
+    /// <summary>Health of the player's healthiest headquarters (Command Center) when the match ended, in percent; null if they had none.</summary>
     public int? CommandCenterHealthPercent { get; init; }
 
     /// <summary>

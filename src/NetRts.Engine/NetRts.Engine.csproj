@@ -12,4 +12,9 @@
     <InternalsVisibleTo Include="NetRts.Engine.Tests" />
   </ItemGroup>
 
+  <!-- Every unit, building and upgrade. Copied next to whatever runs the engine, which reads it at startup. -->
+  <ItemGroup>
+    <None Update="rules.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

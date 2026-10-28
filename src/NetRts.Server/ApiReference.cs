@@ -1,6 +1,8 @@
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
+using NetRts.Engine;
 using NetRts.Protocol;
 using NetRts.Server.Auth;
 using Scalar.AspNetCore;
@@ -30,6 +32,25 @@ public static class ApiReference
                     BearerFormat = "nrts_…",
                     Description = "Your API key from POST /api/v1/players.",
                 };
+                return Task.CompletedTask;
+            });
+
+            // Type names come from the rules file: on the wire they are strings, one of the names it declares.
+            options.AddSchemaTransformer((schema, context, _) =>
+            {
+                var names = context.JsonTypeInfo.Type switch
+                {
+                    var t when t == typeof(UnitType) => GameRules.Units.Keys.Select(k => k.Name),
+                    var t when t == typeof(BuildingType) => GameRules.Buildings.Keys.Select(k => k.Name),
+                    var t when t == typeof(UpgradeType) => GameRules.Upgrades.Keys.Select(k => k.Name),
+                    _ => null,
+                };
+                if (names is not null)
+                {
+                    schema.Type = JsonSchemaType.String;
+                    schema.Enum = [.. names.Select(n => (JsonNode)JsonValue.Create(n))];
+                }
+
                 return Task.CompletedTask;
             });
 

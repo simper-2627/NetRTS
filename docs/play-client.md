@@ -100,7 +100,7 @@ list. Practice matches between two real players count toward the practice ladder
 | **S** | Stop |
 | With workers: **C B D T G** | Place a Command Center, Barracks, Resource Depot, TechLab or Guard Tower. The ghost is green where it may go and red (with the reason) where it may not. Shift-click places several |
 | With a building: **W S A C** | Train a Worker, Soldier, Archer or Scout. Shift trains five |
-| At a TechLab: **W A M H** | Research the next tier of Weapons, Armor, Mobility or Harvesting |
+| At a TechLab: **W A M H** | Research the next tier of Weapons, Armor, Mobility or Harvesting. Other upgrades in the rules (Siege Engineering, any you add) get a button without a hotkey |
 | **Ctrl + 1–9** | Save the selection as a control group (**Shift + 1–9** adds to it) |
 | **1–9** | Recall a group; press twice to look at it |
 | Arrow keys, pointer at the map edge, middle-drag | Scroll |

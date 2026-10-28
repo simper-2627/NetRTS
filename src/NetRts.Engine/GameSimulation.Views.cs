@@ -34,11 +34,13 @@ public sealed partial class GameSimulation
                 QueuedCommands = player.CommandQueue.Count,
                 QueueCapacity = Config.QueueCapacity,
                 IncomePerMinute = player.IncomeWindow.Sum(),
-                Upgrades = player.Upgrades.Order().ToList(),
+                Upgrades = UpgradesOf(player),
                 Researching = _buildings
                     .Where(b => b.Owner == slot && b.Research is not null)
                     .Select(b => ToResearchDto(b))
                     .ToList(),
+                UnitStats = player.UnitStats.Select(kv => RuleSet.ToDto(kv.Key, kv.Value)).ToList(),
+                BuildingStats = player.BuildingStats.Select(kv => RuleSet.ToDto(kv.Key, kv.Value)).ToList(),
             },
             Players = _players.Select(p => new PlayerSummaryDto
             {
@@ -93,7 +95,7 @@ public sealed partial class GameSimulation
                 Resources = p.Resources,
                 UnitCount = _units.Count(u => u.Owner == p.Slot),
                 BuildingCount = _buildings.Count(b => b.Owner == p.Slot),
-                Upgrades = p.Upgrades.Order().ToList(),
+                Upgrades = UpgradesOf(p),
                 IncomePerMinute = p.IncomeWindow.Sum(),
                 Score = ScoreOf(p),
                 Visibility = includeVisibility ? VisibilityRows(VisibilityFor(p.Slot)) : [],
@@ -135,14 +137,17 @@ public sealed partial class GameSimulation
         };
     }
 
+    /// <summary>A player's research, in rules order.</summary>
+    private List<UpgradeType> UpgradesOf(PlayerState p) => Rules.Upgrades.Keys.Where(p.Upgrades.Contains).ToList();
+
     private PlayerMatchStatsDto StatsOf(PlayerState p)
     {
-        var commandCenters = _buildings.Where(b => b.Owner == p.Slot && b.Type == BuildingType.CommandCenter).ToList();
+        var commandCenters = _buildings.Where(b => b.Owner == p.Slot && b.Stats.IsHeadquarters).ToList();
         return new PlayerMatchStatsDto
         {
             UnitsTrained = new SortedDictionary<UnitType, int>(p.UnitsTrained),
             BuildingsCompleted = new SortedDictionary<BuildingType, int>(p.BuildingsCompleted),
-            Upgrades = p.Upgrades.Order().ToList(),
+            Upgrades = UpgradesOf(p),
             FirstBarracksTick = p.FirstBarracksTick,
             FirstCombatUnitTick = p.FirstCombatUnitTick,
             EnemyCommandCenterSeenTick = p.EnemyCommandCenterSeenTick,
@@ -159,7 +164,7 @@ public sealed partial class GameSimulation
             CommandsFailed = p.CommandsFailed,
             LongestWorkerIdleTicks = p.LongestWorkerIdleTicks,
             BuildingsRallied = p.RalliedBuildings.Count,
-            GuardTowersStanding = _buildings.Count(b => b.Owner == p.Slot && b.Type == BuildingType.GuardTower && b.Completed),
+            GuardTowersStanding = _buildings.Count(b => b.Owner == p.Slot && b.Stats.Damage > 0 && b.Completed),
             CommandCenterHealthPercent = commandCenters.Count > 0 ? commandCenters.Max(b => b.Hp * 100 / b.MaxHp) : null,
             LowestScoreSharePercent = p.LowestScoreSharePercent,
         };
@@ -198,7 +203,7 @@ public sealed partial class GameSimulation
         Effects = Factor(u) > 1 ? ["serum"] : null,
     };
 
-    private static BuildingDto ToDto(BuildingEntity b, bool revealQueues) => new()
+    private BuildingDto ToDto(BuildingEntity b, bool revealQueues) => new()
     {
         Id = b.Id,
         Owner = b.Owner,
@@ -210,14 +215,14 @@ public sealed partial class GameSimulation
         Completed = b.Completed,
         ConstructionPercent = b.ConstructionPercent,
         Production = revealQueues
-            ? b.Production.Select(p => new ProductionDto(p.Type, p.Progress * 100 / GameRules.Units[p.Type].BuildTicks)).ToList()
+            ? b.Production.Select(p => new ProductionDto(p.Type, p.Progress * 100 / _players[b.Owner].UnitStats[p.Type].BuildTicks)).ToList()
             : [],
         Research = revealQueues && b.Research is not null ? ToResearchDto(b) : null,
         Rally = revealQueues && b.Rally is { } r ? new PositionDto(r.X, r.Y) : null,
     };
 
-    private static ResearchDto ToResearchDto(BuildingEntity b) =>
-        new(b.Research!.Type, b.Research.Progress * 100 / GameRules.Upgrades[b.Research.Type].ResearchTicks, b.Id);
+    private ResearchDto ToResearchDto(BuildingEntity b) =>
+        new(b.Research!.Type, b.Research.Progress * 100 / Rules.Upgrades[b.Research.Type].ResearchTicks, b.Id);
 
     private static ShellDto ToDto(Shell s) => new()
     {

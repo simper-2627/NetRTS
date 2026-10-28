@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using NetRts.Bots;
+using NetRts.Engine;
 using NetRts.Server;
 using NetRts.Server.Achievements;
 using NetRts.Server.Auth;
@@ -87,6 +88,9 @@ builder.Services.AddResponseCompression(o =>
 builder.Services.Configure<BrotliCompressionProviderOptions>(o => o.Level = System.IO.Compression.CompressionLevel.Optimal);
 
 var app = builder.Build();
+
+// Read the rules now, so a broken rules.json stops the server here with every problem listed.
+app.Logger.LogInformation("Rules {Version} from {Path}", GameRules.Version, Path.Combine(AppContext.BaseDirectory, RuleSet.FileName));
 
 await InitializeDatabaseAsync(app.Services);
 

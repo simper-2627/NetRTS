@@ -22,6 +22,9 @@ public sealed class GameConfig
 
     /// <summary>How many recent events are kept per player.</summary>
     public int EventHistory { get; init; } = 200;
+
+    /// <summary>The units, buildings, upgrades and economy to play with.</summary>
+    public RuleSet Rules { get; init; } = GameRules.Current;
 }
 
 public sealed record PlayerSeat(Guid Id, string Name);
@@ -69,19 +72,23 @@ public sealed partial class GameSimulation
 
         for (var slot = 0; slot < seats.Count; slot++)
         {
-            _players.Add(new PlayerState(seats[slot].Id, slot, seats[slot].Name));
+            _players.Add(new PlayerState(seats[slot].Id, slot, seats[slot].Name, Rules));
             var start = Map.StartPositions[slot];
-            AddBuilding(slot, BuildingType.CommandCenter, start, completed: true);
-            for (var i = 0; i < GameRules.StartingWorkers; i++)
+            AddBuilding(slot, Rules.Economy.StartingBuilding, start, completed: true);
+            foreach (var (type, count) in Rules.Economy.StartingUnits)
             {
-                var spot = FindFreeTileNear(start) ?? start;
-                AddUnit(slot, UnitType.Worker, spot);
+                for (var i = 0; i < count; i++)
+                {
+                    var spot = FindFreeTileNear(start) ?? start;
+                    AddUnit(slot, type, spot);
+                }
             }
         }
     }
 
     public Guid MatchId { get; }
     public GameConfig Config { get; }
+    public RuleSet Rules => Config.Rules;
     public GameMap Map { get; }
     public int Tick { get; private set; }
     public MatchStatus Status { get; private set; } = MatchStatus.Active;
@@ -159,8 +166,8 @@ public sealed partial class GameSimulation
     }
 
     /// <summary>
-    /// Once per player per match: soldiers they command with <c>boosted</c> during the next
-    /// <see cref="GameRules.SerumTicks"/> ticks fight and move at <see cref="GameRules.SerumFactor"/>x.
+    /// Once per player per match: units with <see cref="UnitStats.SerumBoost"/> (soldiers) they command with
+    /// <c>boosted</c> during the next <see cref="SerumRules.Ticks"/> ticks fight and move at <see cref="SerumRules.Factor"/>x.
     /// Returns the last tick it lasts, or null if the match isn't running, the player is out, or it was already taken.
     /// </summary>
     public int? Boost(int slot)
@@ -171,7 +178,7 @@ public sealed partial class GameSimulation
             return null;
         }
 
-        player.SerumUntilTick = Tick + GameRules.SerumTicks;
+        player.SerumUntilTick = Tick + Rules.Serum.Ticks;
         _replayBoosts.Add(new ReplayBoostDto(Tick, slot));
         return player.SerumUntilTick;
     }
@@ -191,7 +198,7 @@ public sealed partial class GameSimulation
 
     /// <summary>
     /// Bump when a change to the simulation would make an old replay play out differently, even if no
-    /// number in <see cref="GameRules"/> changed. Part of <see cref="GameRules.Version"/>.
+    /// number in the rules file changed. Part of <see cref="RuleSet.Version"/>.
     /// </summary>
     public const int Revision = 1;
 
@@ -302,7 +309,7 @@ public sealed partial class GameSimulation
 
     private UnitEntity AddUnit(int owner, UnitType type, Point position)
     {
-        var unit = new UnitEntity(_nextEntityId++, owner, type, position);
+        var unit = new UnitEntity(_nextEntityId++, owner, type, _players[owner].UnitStats[type], position);
         _units.Add(unit);
         _entities[unit.Id] = unit;
         return unit;
@@ -310,7 +317,7 @@ public sealed partial class GameSimulation
 
     private BuildingEntity AddBuilding(int owner, BuildingType type, Point position, bool completed)
     {
-        var building = new BuildingEntity(_nextEntityId++, owner, type, position, completed);
+        var building = new BuildingEntity(_nextEntityId++, owner, type, _players[owner].BuildingStats[type], position, completed);
         _buildings.Add(building);
         _entities[building.Id] = building;
         _buildingAt[Index(position)] = building.Id;
@@ -449,7 +456,7 @@ public sealed partial class GameSimulation
 
         foreach (var b in _buildings.Where(b => b.Owner == slot))
         {
-            Reveal(b.Position, b.Completed ? b.Stats.Vision : GameRules.UnderConstructionVision);
+            Reveal(b.Position, b.Completed ? b.Stats.Vision : Rules.Economy.UnderConstructionVision);
         }
 
         return grid;

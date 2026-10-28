@@ -41,12 +41,13 @@ dotnet run --project play/NetRts.PlayClient    # http://localhost:5090, play by 
 ```
 
 - `src/NetRts.Engine` — deterministic simulation (`GameSimulation` partials: core, Commands, Tick, Views, Testing), `GameRules`, `MapGenerator`, `Pathfinder`. No clocks, `System.Random` or unordered iteration; the replay test checks determinism.
+- `src/NetRts.Engine/rules.json` — every unit, building, upgrade and economy number (format in `CONTRIBUTING.md`), loaded and validated by `RuleSet`; `GameRules.Current` is the copy next to the app. `UnitType`/`BuildingType`/`UpgradeType` are string ids from this file, not enums, so the engine checks role flags (`IsWorker`, `IsHeadquarters`, `SerumBoost`), never names. Upgrades set absolute stat values per player (`PlayerState.UnitStats`/`BuildingStats`), applied to existing entities with HP rescaled.
 - `src/NetRts.Protocol` — JSON DTOs shared with bots. Add fields; don't rename them.
 - `src/NetRts.Server` — ASP.NET Core minimal APIs; `Matches/MatchHost` wraps one simulation behind a lock.
 - `play/NetRts.PlayClient` — Blazor WebAssembly manual play client (`dotnet run --project play/NetRts.PlayClient`, http://localhost:5090), its own `play/NetRts.Play.sln`, tests in `play/NetRts.PlayClient.Tests`. It is an ordinary API player: fogged `/state` only, never `/spectate`. See `docs/play-client.md`; plan and progress in `docs/play-client-plan.md`.
 - This repo is a fork of SnowSE/NetRTS. Keep `src/` laid out as upstream has it so merges stay clean: everything fork-only lives under `play/`. The play client links `mapview.js`, `util.js`, `lore.js`, `theme.js` and the Snow "S" images straight from `src/NetRts.Server/wwwroot` (see its `.csproj`), served at the same paths as on the spectator site; never move or copy them. `play/NetRts.PlayClient/wwwroot/css/netrts.css` is a copy of the colour tokens in the server's `styles.css`.
 - `src/NetRts.Bots` — `NetRtsClient`, `BotLoop`, `PlanBot` + house bot plans.
-- `docs/bot-guide.md` is the player-facing rules/API doc — keep it in sync with `GameRules` and the endpoints. `docs/requirements-coverage.md` maps the spec to code.
+- `docs/bot-guide.md` is the player-facing rules/API doc — keep it in sync with `rules.json` and the endpoints. `docs/requirements-coverage.md` maps the spec to code.
 - `src/NetRts.Server/Achievements` — the 75 achievements (`AchievementCatalog`; ids are stored, never change one) and their evaluation; `Recaps` — nightly ladder snapshots and the recap brief.
 - `recap/` — the nightly recap video job (Node: Azure OpenAI gpt-5.5 + Azure Speech in Foundry, Playwright + ffmpeg); `deploy/recap/setup.sh` + `main.bicep` create its Azure resources.
 - `src/NetRts.AppHost` — Aspire: local dev and the Azure deployment (private network, see `docs/deploying.md`).

@@ -38,7 +38,7 @@ public static class CommandCard
         [UnitType.Scout] = 'C',
     };
 
-    /// <summary>Each upgrade line has one key; it researches the next tier.</summary>
+    /// <summary>Each upgrade line has one key; it researches the next tier. Lines from the rules without one get '?'.</summary>
     public static readonly IReadOnlyDictionary<string, char> ResearchKeys = new Dictionary<string, char>
     {
         ["Weapons"] = 'W',
@@ -47,10 +47,18 @@ public static class CommandCard
         ["Harvesting"] = 'H',
     };
 
+    /// <summary>What a unit costs you now: your stats from the state, since research can change costs, else the rules'.</summary>
+    public static int UnitCost(GameStateDto state, RulesDto rules, UnitType type) =>
+        (state.You.UnitStats.FirstOrDefault(u => u.Type == type) ?? rules.Units.FirstOrDefault(u => u.Type == type))?.Cost ?? 0;
+
+    /// <summary>What a building costs you now: your stats from the state, since research can change costs, else the rules'.</summary>
+    public static int BuildingCost(GameStateDto state, RulesDto rules, BuildingType type) =>
+        (state.You.BuildingStats.FirstOrDefault(b => b.Type == type) ?? rules.Buildings.FirstOrDefault(b => b.Type == type))?.Cost ?? 0;
+
     /// <summary>Workers selected: a Build button for each building type.</summary>
     public static IReadOnlyList<CardButton> BuildButtons(GameStateDto state, RulesDto rules, int budget, Lore? lore = null) =>
         rules.Buildings.Select(b => new CardButton(
-            new BuildAction(b.Type), BuildKeys.GetValueOrDefault(b.Type, '?'), b.Cost, Placement.GlobalProblem(state, rules, b.Type, budget, lore))).ToList();
+            new BuildAction(b.Type), BuildKeys.GetValueOrDefault(b.Type, '?'), BuildingCost(state, rules, b.Type), Placement.GlobalProblem(state, rules, b.Type, budget, lore))).ToList();
 
     /// <summary>One of your buildings selected: what it trains, and (a TechLab) what it can research.</summary>
     public static IReadOnlyList<CardButton> BuildingButtons(GameStateDto state, RulesDto rules, BuildingDto building, int budget, Lore? lore = null)
@@ -66,7 +74,7 @@ public static class CommandCard
         var queueFull = building.Production.Count >= rules.Economy.MaxProductionQueue;
         foreach (var unit in stats.Produces)
         {
-            var cost = rules.Units.FirstOrDefault(u => u.Type == unit)?.Cost ?? 0;
+            var cost = UnitCost(state, rules, unit);
             var blocked = !building.Completed ? "Still under construction"
                 : queueFull ? $"Queue full ({rules.Economy.MaxProductionQueue})"
                 : budget < cost ? $"Not enough {lore.Ore}" : null;
@@ -75,11 +83,11 @@ public static class CommandCard
 
         if (stats.CanResearch)
         {
-            foreach (var line in ResearchKeys)
+            foreach (var line in rules.Upgrades.Select(u => Line(u.Type)).Distinct())
             {
-                if (NextTier(state, rules, line.Key) is not { } upgrade)
+                if (NextTier(state, rules, line) is not { } upgrade)
                 {
-                    continue; // both tiers done
+                    continue; // every tier done
                 }
 
                 var blocked = !building.Completed ? "Still under construction"
@@ -87,18 +95,19 @@ public static class CommandCard
                     : state.You.Researching.Any(r => r.Upgrade == upgrade.Type) ? "Being researched elsewhere"
                     : upgrade.Requires is { } before && !state.You.Upgrades.Contains(before) ? $"Needs {lore.Upgrade(before)}"
                     : budget < upgrade.Cost ? $"Not enough {lore.Ore}" : null;
-                buttons.Add(new CardButton(new ResearchAction(upgrade.Type), line.Value, upgrade.Cost, blocked));
+                buttons.Add(new CardButton(new ResearchAction(upgrade.Type), ResearchKeys.GetValueOrDefault(line, '?'), upgrade.Cost, blocked));
             }
         }
 
         return buttons;
     }
 
-    /// <summary>The first tier of an upgrade line (e.g. "Weapons") that you don't have yet.</summary>
+    /// <summary>The first tier, in rules order, of an upgrade line (e.g. "Weapons") that you don't have yet.</summary>
     public static UpgradeStatsDto? NextTier(GameStateDto state, RulesDto rules, string line) =>
-        rules.Upgrades.Where(u => u.Type.ToString().StartsWith(line, StringComparison.Ordinal) && !state.You.Upgrades.Contains(u.Type))
-            .OrderBy(u => u.Type)
-            .FirstOrDefault();
+        rules.Upgrades.FirstOrDefault(u => Line(u.Type) == line && !state.You.Upgrades.Contains(u.Type));
+
+    /// <summary>The line an upgrade belongs to: its name without the tier number ("Weapons2" → "Weapons").</summary>
+    private static string Line(UpgradeType type) => type.Name.TrimEnd("0123456789".ToCharArray());
 
     /// <summary>The button a key presses, if any (case-insensitive).</summary>
     public static CardButton? ForKey(IEnumerable<CardButton> buttons, char key) =>
@@ -153,7 +162,12 @@ public static class Placement
             }
         }
 
-        return budget < stats.Cost ? $"Not enough {lore.Ore}" : null;
+        if (stats.RequiresUpgrade is { } upgrade && !state.You.Upgrades.Contains(upgrade))
+        {
+            return $"Needs {lore.Upgrade(upgrade)}";
+        }
+
+        return budget < CommandCard.BuildingCost(state, rules, type) ? $"Not enough {lore.Ore}" : null;
     }
 
     /// <summary>What rules out this tile: off the map, rock, a deposit, a building, or a visible enemy on it.</summary>

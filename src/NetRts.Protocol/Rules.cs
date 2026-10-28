@@ -40,7 +40,17 @@ public sealed record UnitStatsDto
     /// <summary>Tenths of a tile per tick (10 = one tile per tick).</summary>
     public int Speed { get; init; }
 
-    public BuildingType ProducedAt { get; init; }
+    /// <summary>The building that trains it; null for a unit nothing trains (one you only start with).</summary>
+    public BuildingType? ProducedAt { get; init; }
+
+    /// <summary>Gathers ore and constructs buildings (Gather and Build select only these), and never fights back on its own.</summary>
+    public bool IsWorker { get; init; }
+
+    /// <summary>Ore a worker carries per trip.</summary>
+    public int CarryCapacity { get; init; }
+
+    /// <summary>Ore a worker mines per tick.</summary>
+    public int GatherPerTick { get; init; }
 }
 
 public sealed record BuildingStatsDto
@@ -65,6 +75,9 @@ public sealed record BuildingStatsDto
 
     /// <summary>An upgrade that must be researched before this building can be started, if any.</summary>
     public UpgradeType? RequiresUpgrade { get; init; }
+
+    /// <summary>Lose every headquarters building (finished or under construction) and you are eliminated.</summary>
+    public bool IsHeadquarters { get; init; }
 }
 
 public sealed record UpgradeStatsDto
@@ -74,13 +87,38 @@ public sealed record UpgradeStatsDto
     public int ResearchTicks { get; init; }
     public UpgradeType? Requires { get; init; }
     public string Effect { get; init; } = "";
+
+    /// <summary>
+    /// The unit stats this upgrade sets, by unit type and then stat name, e.g. <c>{ "Soldier": { "damage": 11 } }</c>.
+    /// They replace the researcher's current values for those units, the ones already on the field included
+    /// (HP keeps the same percentage of max HP). If two upgrades set the same stat, the one researched last wins.
+    /// </summary>
+    public IReadOnlyDictionary<UnitType, IReadOnlyDictionary<string, int>> Units { get; init; } =
+        new Dictionary<UnitType, IReadOnlyDictionary<string, int>>();
+
+    /// <summary>The building stats this upgrade sets, in the same way as <see cref="Units"/>.</summary>
+    public IReadOnlyDictionary<BuildingType, IReadOnlyDictionary<string, int>> Buildings { get; init; } =
+        new Dictionary<BuildingType, IReadOnlyDictionary<string, int>>();
 }
 
 public sealed record EconomyRulesDto
 {
     public int StartingResources { get; init; }
+
+    /// <summary>How many of the starting units are workers.</summary>
     public int StartingWorkers { get; init; }
+
+    /// <summary>The first worker type's base carry capacity; each unit type has its own (<see cref="UnitStatsDto.CarryCapacity"/>).</summary>
     public int WorkerCarryCapacity { get; init; }
+
+    /// <summary>The first worker type's base mining rate; each unit type has its own (<see cref="UnitStatsDto.GatherPerTick"/>).</summary>
     public int GatherPerTick { get; init; }
+
     public int MaxProductionQueue { get; init; }
+
+    /// <summary>The building each player starts with (a headquarters).</summary>
+    public BuildingType StartingBuilding { get; init; }
+
+    /// <summary>The units each player starts with, by type.</summary>
+    public IReadOnlyDictionary<UnitType, int> StartingUnits { get; init; } = new Dictionary<UnitType, int>();
 }

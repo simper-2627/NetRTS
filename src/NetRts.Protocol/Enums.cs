@@ -2,41 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace NetRts.Protocol;
 
-[JsonConverter(typeof(JsonStringEnumConverter<UnitType>))]
-public enum UnitType
-{
-    Worker,
-    Soldier,
-    Archer,
-    Scout,
-    Trebuchet,
-}
-
-[JsonConverter(typeof(JsonStringEnumConverter<BuildingType>))]
-public enum BuildingType
-{
-    CommandCenter,
-    Barracks,
-    ResourceDepot,
-    TechLab,
-    GuardTower,
-    SiegeWorkshop,
-}
-
-[JsonConverter(typeof(JsonStringEnumConverter<UpgradeType>))]
-public enum UpgradeType
-{
-    Weapons1,
-    Weapons2,
-    Armor1,
-    Armor2,
-    Mobility1,
-    Mobility2,
-    Harvesting1,
-    Harvesting2,
-    SiegeEngineering,
-}
-
 [JsonConverter(typeof(JsonStringEnumConverter<CommandType>))]
 public enum CommandType
 {
@@ -50,7 +15,7 @@ public enum CommandType
     Build,
     /// <summary>A building (buildingId) queues production of unitType.</summary>
     Produce,
-    /// <summary>A TechLab (buildingId) researches an upgrade.</summary>
+    /// <summary>A building that can research (buildingId, e.g. a TechLab) researches an upgrade.</summary>
     Research,
     /// <summary>Units drop their current order and go idle.</summary>
     Stop,

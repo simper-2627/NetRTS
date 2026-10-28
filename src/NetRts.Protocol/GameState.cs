@@ -80,6 +80,12 @@ public sealed record SelfDto
 
     /// <summary>Ore banked over the last 60 ticks (one minute at normal speed).</summary>
     public int IncomePerMinute { get; init; }
+
+    /// <summary>Your unit stats right now: the rules' base stats with your research applied.</summary>
+    public IReadOnlyList<UnitStatsDto> UnitStats { get; init; } = [];
+
+    /// <summary>Your building stats right now: the rules' base stats with your research applied.</summary>
+    public IReadOnlyList<BuildingStatsDto> BuildingStats { get; init; } = [];
 }
 
 public sealed record PlayerSummaryDto

@@ -10,6 +10,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="NetRts.Engine.Tests" />
+    <InternalsVisibleTo Include="NetRts.Engine.Tests" />
+    <InternalsVisibleTo Include="Balance.Tests" />
   </ItemGroup>
 
 </Project>
